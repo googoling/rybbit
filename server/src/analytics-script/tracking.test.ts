@@ -103,6 +103,8 @@ describe("Tracker", () => {
       trackButtonClicks: false,
       trackCopy: false,
       trackFormInteractions: false,
+      enableHeatmaps: false,
+      heatmapSampleRate: 100,
       tag: "",
       featureFlags: {},
     };

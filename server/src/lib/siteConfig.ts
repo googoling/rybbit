@@ -28,6 +28,8 @@ export interface SiteConfigData {
   trackButtonClicks: boolean;
   trackCopy: boolean;
   trackFormInteractions: boolean;
+  enableHeatmaps: boolean;
+  heatmapSampleRate: number;
   tags: string[];
 }
 
@@ -112,6 +114,8 @@ class SiteConfig {
         trackButtonClicks: site.trackButtonClicks || false,
         trackCopy: site.trackCopy || false,
         trackFormInteractions: site.trackFormInteractions || false,
+        enableHeatmaps: site.enableHeatmaps || false,
+        heatmapSampleRate: site.heatmapSampleRate ?? 100,
         tags: Array.isArray(site.tags) ? site.tags : [],
       };
 

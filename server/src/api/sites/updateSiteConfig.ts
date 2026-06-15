@@ -45,6 +45,8 @@ const updateSiteConfigSchema = z.object({
   trackButtonClicks: z.boolean().optional(),
   trackCopy: z.boolean().optional(),
   trackFormInteractions: z.boolean().optional(),
+  enableHeatmaps: z.boolean().optional(),
+  heatmapSampleRate: z.number().int().min(0).max(100).optional(),
 });
 
 type UpdateSiteConfigRequest = z.infer<typeof updateSiteConfigSchema>;
@@ -177,6 +179,8 @@ export async function updateSiteConfig(
       "trackButtonClicks",
       "trackCopy",
       "trackFormInteractions",
+      "enableHeatmaps",
+      "heatmapSampleRate",
     ];
 
     for (const field of directMappings) {

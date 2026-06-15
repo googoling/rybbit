@@ -71,6 +71,17 @@ import {
   updateDashboard,
   updateGoal,
 } from "./api/analytics/index.js";
+import {
+  getAttentionMap,
+  getClickHeatmap,
+  getClickInsights,
+  getHeatmapPages,
+  getHeatmapSnapshot,
+  getRankedElements,
+  getScrollMap,
+  recordHeatmap,
+  recordHeatmapSnapshot,
+} from "./api/heatmap/index.js";
 import { getConfig, getVersion } from "./api/getConfig.js";
 import {
   createExperiment,
@@ -308,6 +319,13 @@ async function analyticsRoutes(fastify: FastifyInstance) {
   fastify.post("/sites/:siteId/goals", authSite, createGoal);
   fastify.delete("/sites/:siteId/goals/:goalId", authSite, deleteGoal);
   fastify.put("/sites/:siteId/goals/:goalId", authSite, updateGoal);
+  fastify.get("/sites/:siteId/heatmap/pages", publicSite, getHeatmapPages);
+  fastify.get("/sites/:siteId/heatmap/clicks", publicSite, getClickHeatmap);
+  fastify.get("/sites/:siteId/heatmap/attention", publicSite, getAttentionMap);
+  fastify.get("/sites/:siteId/heatmap/scroll", publicSite, getScrollMap);
+  fastify.get("/sites/:siteId/heatmap/elements", publicSite, getRankedElements);
+  fastify.get("/sites/:siteId/heatmap/insights", publicSite, getClickInsights);
+  fastify.get("/sites/:siteId/heatmap/snapshot", publicSite, getHeatmapSnapshot);
   fastify.get("/sites/:siteId/dashboards", authSite, getDashboards);
   fastify.get("/sites/:siteId/dashboards/:dashboardId", authSite, getDashboard);
   fastify.post("/sites/:siteId/dashboards", authSite, createDashboard);
@@ -343,6 +361,8 @@ async function analyticsRoutes(fastify: FastifyInstance) {
 async function sessionReplayRoutes(fastify: FastifyInstance) {
   // Session Replay
   fastify.post("/session-replay/record/:siteId", recordSessionReplay); // Public - tracking endpoint
+  fastify.post("/heatmap/record/:siteId", recordHeatmap); // Public - tracking endpoint
+  fastify.post("/heatmap/snapshot/:siteId", recordHeatmapSnapshot); // Public - tracking endpoint
   fastify.get("/sites/:siteId/session-replay/list", publicSite, getSessionReplays);
   fastify.get("/sites/:siteId/session-replay/:sessionId", publicSite, getSessionReplayEvents);
   fastify.delete("/sites/:siteId/session-replay/:sessionId", authSite, deleteSessionReplay);

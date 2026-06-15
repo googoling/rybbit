@@ -32,6 +32,8 @@ export async function getTrackingConfig(request: FastifyRequest<{ Params: { site
       trackButtonClicks: config.trackButtonClicks || false,
       trackCopy: config.trackCopy || false,
       trackFormInteractions: config.trackFormInteractions || false,
+      enableHeatmaps: config.type === "mobile" ? false : config.enableHeatmaps || false,
+      heatmapSampleRate: config.heatmapSampleRate ?? 100,
     });
   } catch (error) {
     console.error("Error getting tracking config:", error);

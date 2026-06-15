@@ -7,6 +7,7 @@ import {
   Database,
   File,
   Flag,
+  Flame,
   FlaskConical,
   Funnel,
   Gauge,
@@ -28,6 +29,7 @@ import { useGetSite } from "../../../../api/admin/hooks/useSites";
 import { Sidebar as SidebarComponents } from "../../../../components/sidebar/Sidebar";
 import { SiteSettings } from "../../../../components/SiteSettings/SiteSettings";
 import { DEMO_HOSTNAME, IS_CLOUD } from "../../../../lib/const";
+import { featureEnabled } from "../../../../lib/featureOverrides";
 import { getSiteRouteContext } from "../../../../lib/siteRoute";
 import { useEmbedPageOptions } from "../../utils";
 import { SiteSelector } from "./SiteSelector";
@@ -88,7 +90,7 @@ function SidebarContent() {
           href={getTabPath("globe")}
           icon={<Globe2 className="w-4 h-4" />}
         />
-        {IS_CLOUD && (
+        {featureEnabled.pages && (
           <SidebarComponents.Item
             label={t("Pages")}
             active={isActiveTab("pages")}
@@ -96,7 +98,7 @@ function SidebarContent() {
             icon={<File className="w-4 h-4" />}
           />
         )}
-        {IS_CLOUD && !isMobileSite && (
+        {featureEnabled.performance && !isMobileSite && (
           <SidebarComponents.Item
             label={t("Performance")}
             active={isActiveTab("performance")}
@@ -104,7 +106,7 @@ function SidebarContent() {
             icon={<Gauge className="w-4 h-4" />}
           />
         )}
-        {IS_CLOUD && (
+        {featureEnabled.bots && (
           <SidebarComponents.Item
             label={t("Bots")}
             active={isActiveTab("bots")}
@@ -206,6 +208,14 @@ function SidebarContent() {
           href={getTabPath("events")}
           icon={<MousePointerClick className="w-4 h-4" />}
         />
+        {!isMobileSite && (
+          <SidebarComponents.Item
+            label={t("Heatmaps")}
+            active={isActiveTab("heatmaps")}
+            href={getTabPath("heatmaps")}
+            icon={<Flame className="w-4 h-4" />}
+          />
+        )}
         <SidebarComponents.Item
           label={t("Errors")}
           active={isActiveTab("errors")}

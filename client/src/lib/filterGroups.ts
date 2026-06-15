@@ -40,6 +40,16 @@ export const EVENT_FILTERS: FilterParameter[] = [
 
 export const GOALS_PAGE_FILTERS: FilterParameter[] = [...BASE_FILTERS];
 
+// Only columns that exist on the heatmap_events table (device is a separate toggle).
+export const HEATMAPS_PAGE_FILTERS: FilterParameter[] = [
+  "hostname",
+  "country",
+  "region",
+  "city",
+  "browser",
+  "operating_system",
+];
+
 export const FUNNEL_PAGE_FILTERS: FilterParameter[] = [...BASE_FILTERS];
 
 export const USER_PAGE_FILTERS: FilterParameter[] = [

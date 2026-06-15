@@ -27,6 +27,8 @@ export type SiteResponse = {
   trackButtonClicks?: boolean;
   trackCopy?: boolean;
   trackFormInteractions?: boolean;
+  enableHeatmaps?: boolean;
+  heatmapSampleRate?: number;
   tags?: string[];
 };
 
@@ -137,6 +139,8 @@ export function updateSiteConfig(
     trackButtonClicks?: boolean;
     trackCopy?: boolean;
     trackFormInteractions?: boolean;
+    enableHeatmaps?: boolean;
+    heatmapSampleRate?: number;
     tags?: string[];
   }
 ) {

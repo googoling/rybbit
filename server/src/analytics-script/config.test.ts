@@ -75,6 +75,8 @@ describe("parseScriptConfig", () => {
       trackButtonClicks: false,
       trackCopy: false,
       trackFormInteractions: false,
+      enableHeatmaps: false,
+      heatmapSampleRate: 100,
       tag: "",
       featureFlags: {
         new_checkout: {
@@ -140,6 +142,8 @@ describe("parseScriptConfig", () => {
       trackButtonClicks: false,
       trackCopy: false,
       trackFormInteractions: false,
+      enableHeatmaps: false,
+      heatmapSampleRate: 100,
       tag: "",
       featureFlags: {},
       skipPatterns: [],
@@ -188,6 +192,8 @@ describe("parseScriptConfig", () => {
       trackButtonClicks: false,
       trackCopy: false,
       trackFormInteractions: false,
+      enableHeatmaps: false,
+      heatmapSampleRate: 100,
       tag: "",
       featureFlags: {},
       skipPatterns: [],

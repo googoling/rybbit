@@ -85,6 +85,8 @@ export function isPublicCorsPath(path: string): boolean {
     path === "/api/identify" ||
     path === "/api/version" ||
     path.startsWith("/api/session-replay/record/") ||
+    path.startsWith("/api/heatmap/record/") ||
+    path.startsWith("/api/heatmap/snapshot/") ||
     path.startsWith("/api/site/tracking-config/") ||
     /^\/api\/sites\/[^/]+\/sessions$/.test(path) ||
     /^\/api\/sites\/[^/]+\/embed-stats$/.test(path) ||

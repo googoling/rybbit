@@ -88,7 +88,8 @@ async function fetchFeatureFlags(
  * Most configuration will be fetched from the API
  */
 export async function parseScriptConfig(scriptTag: HTMLScriptElement): Promise<ScriptConfig | null> {
-  const src = scriptTag.getAttribute("src");
+  // delay-JS plugins move the real URL into data-src, so accept either.
+  const src = scriptTag.getAttribute("src") || scriptTag.getAttribute("data-src");
   if (!src) {
     console.error("Script src attribute is missing");
     return null;
@@ -183,6 +184,8 @@ export async function parseScriptConfig(scriptTag: HTMLScriptElement): Promise<S
     trackButtonClicks: false,
     trackCopy: false,
     trackFormInteractions: false,
+    enableHeatmaps: false,
+    heatmapSampleRate: 100,
     tag,
     featureFlags: {},
     // rrweb session replay options (undefined means use rrweb defaults)
@@ -227,6 +230,8 @@ export async function parseScriptConfig(scriptTag: HTMLScriptElement): Promise<S
         trackButtonClicks: apiConfig.trackButtonClicks ?? defaultConfig.trackButtonClicks,
         trackCopy: apiConfig.trackCopy ?? defaultConfig.trackCopy,
         trackFormInteractions: apiConfig.trackFormInteractions ?? defaultConfig.trackFormInteractions,
+        enableHeatmaps: apiConfig.enableHeatmaps ?? defaultConfig.enableHeatmaps,
+        heatmapSampleRate: apiConfig.heatmapSampleRate ?? defaultConfig.heatmapSampleRate,
       };
     } else {
       // If API call fails, log warning and use defaults

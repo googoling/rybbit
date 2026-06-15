@@ -4,6 +4,7 @@ import { useExtracted } from "next-intl";
 import { useState, useCallback, ReactNode } from "react";
 import { toast } from "@/components/ui/sonner";
 
+import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
 
@@ -47,9 +48,12 @@ export function TrackingTab({ siteMetadata, disabled = false }: TrackingTabProps
     trackButtonClicks: siteMetadata.trackButtonClicks ?? false,
     trackCopy: siteMetadata.trackCopy ?? false,
     trackFormInteractions: siteMetadata.trackFormInteractions ?? false,
+    enableHeatmaps: siteMetadata.enableHeatmaps ?? false,
   });
 
   const [loadingStates, setLoadingStates] = useState<Record<string, boolean>>({});
+  const [heatmapSampleRate, setHeatmapSampleRate] = useState(siteMetadata.heatmapSampleRate ?? 100);
+  const [savingSampleRate, setSavingSampleRate] = useState(false);
 
   const handleToggle = useCallback(
     async (
@@ -78,6 +82,22 @@ export function TrackingTab({ siteMetadata, disabled = false }: TrackingTabProps
     },
     [siteMetadata.siteId, refetch]
   );
+
+  const saveSampleRate = useCallback(async () => {
+    const clamped = Math.min(100, Math.max(0, Math.round(heatmapSampleRate || 0)));
+    setSavingSampleRate(true);
+    try {
+      await updateSiteConfig(siteMetadata.siteId, { heatmapSampleRate: clamped });
+      setHeatmapSampleRate(clamped);
+      toast.success(t("Heatmap sample rate updated"));
+      refetch();
+    } catch (error) {
+      console.error("Error updating heatmap sample rate:", error);
+      toast.error(t("Failed to update sample rate"));
+    } finally {
+      setSavingSampleRate(false);
+    }
+  }, [heatmapSampleRate, siteMetadata.siteId, refetch, t]);
 
   const { data: subscription, isLoading: isSubscriptionLoading } = useStripeSubscription();
 
@@ -255,10 +275,52 @@ export function TrackingTab({ siteMetadata, disabled = false }: TrackingTabProps
     </div>
   );
 
+  const heatmapsToggles: ToggleConfig[] = !isMobileSite
+    ? [
+        {
+          id: "enableHeatmaps",
+          label: t("Heatmaps"),
+          description: t("Capture clicks, scroll depth, attention, and rage/dead clicks to render heatmaps"),
+          value: toggleStates.enableHeatmaps,
+          key: "enableHeatmaps",
+          enabledMessage: t("Heatmaps enabled"),
+          disabledMessage: t("Heatmaps disabled"),
+        } as ToggleConfig,
+      ]
+    : [];
+
   return (
     <div className="space-y-6">
       {renderToggleSection(analyticsToggles, t("Analytics Features"))}
       {renderToggleSection(autoCaptureToggles, t("Auto Capture"))}
+      {!isMobileSite && (
+        <div className="space-y-4">
+          {renderToggleSection(heatmapsToggles, t("Heatmaps"))}
+          {toggleStates.enableHeatmaps && (
+            <div className="flex items-center justify-between">
+              <div>
+                <Label htmlFor="heatmapSampleRate" className="text-sm font-medium text-foreground">
+                  {t("Sample rate (%)")}
+                </Label>
+                <p className="text-xs text-muted-foreground mt-1">
+                  {t("Percentage of sessions to capture for heatmaps")}
+                </p>
+              </div>
+              <Input
+                id="heatmapSampleRate"
+                type="number"
+                min={0}
+                max={100}
+                className="w-24"
+                value={heatmapSampleRate}
+                disabled={disabled || savingSampleRate}
+                onChange={e => setHeatmapSampleRate(Number(e.target.value))}
+                onBlur={saveSampleRate}
+              />
+            </div>
+          )}
+        </div>
+      )}
     </div>
   );
 }

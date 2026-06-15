@@ -4,6 +4,8 @@ import { WebVitalsCollector } from "./webVitals.js";
 import { ClickTrackingManager } from "./clickTracking.js";
 import { CopyTrackingManager } from "./copyTracking.js";
 import { FormTrackingManager } from "./formTracking.js";
+import { HeatmapTrackingManager } from "./heatmapTracking.js";
+import { HeatmapSnapshotManager } from "./heatmapSnapshot.js";
 import { debounce, isOutboundLink } from "./utils.js";
 import { RybbitAPI, WebVitalsData, ErrorProperties } from "./types.js";
 
@@ -16,7 +18,15 @@ declare global {
 }
 
 (async function () {
-  const scriptTag = document.currentScript as HTMLScriptElement;
+  // FlyingPress / delay-JS plugins re-inject the script without data-* and break
+  // document.currentScript, so fall back to locating our tag by its attributes.
+  let scriptTag = document.currentScript as HTMLScriptElement | null;
+  if (!scriptTag || !scriptTag.getAttribute("data-site-id")) {
+    scriptTag =
+      (document.querySelector("script[data-site-id]") as HTMLScriptElement | null) ||
+      (document.querySelector('script[src*="/script.js"]') as HTMLScriptElement | null) ||
+      scriptTag;
+  }
   if (!scriptTag) {
     console.error("Could not find current script tag");
     return;
@@ -99,6 +109,8 @@ declare global {
   let clickManager: ClickTrackingManager | null = null;
   let copyManager: CopyTrackingManager | null = null;
   let formManager: FormTrackingManager | null = null;
+  let heatmapManager: HeatmapTrackingManager | null = null;
+  let heatmapSnapshotManager: HeatmapSnapshotManager | null = null;
 
   // Initialize click tracking if enabled
   if (config.trackButtonClicks) {
@@ -116,6 +128,14 @@ declare global {
   if (config.trackFormInteractions) {
     formManager = new FormTrackingManager(tracker, config);
     formManager.initialize();
+  }
+
+  // Initialize heatmaps if enabled (event capture + one frozen backdrop snapshot per page)
+  if (config.enableHeatmaps) {
+    heatmapManager = new HeatmapTrackingManager(tracker, config);
+    heatmapManager.initialize();
+    heatmapSnapshotManager = new HeatmapSnapshotManager(config);
+    heatmapSnapshotManager.initialize();
   }
 
   // Initialize error tracking if enabled
@@ -239,6 +259,8 @@ declare global {
   window.addEventListener("beforeunload", () => {
     clickManager?.cleanup();
     copyManager?.cleanup();
+    heatmapManager?.cleanup();
+    heatmapSnapshotManager?.cleanup();
     tracker.cleanup();
   });
 

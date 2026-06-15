@@ -31,6 +31,8 @@ export interface ScriptConfig {
   trackButtonClicks: boolean;
   trackCopy: boolean;
   trackFormInteractions: boolean;
+  enableHeatmaps: boolean;
+  heatmapSampleRate: number;
   tag: string;
   featureFlags: Record<string, FeatureFlagAssignment>;
 }
@@ -166,4 +168,39 @@ export interface SessionReplayBatch {
     viewportHeight?: number;
     language?: string;
   };
+}
+
+export interface HeatmapEvent {
+  type: "click" | "scroll" | "rage" | "dead" | "move";
+  pathname: string;
+  x_percent: number;
+  y_absolute: number;
+  viewport_width: number;
+  viewport_height: number;
+  page_width: number;
+  page_height: number;
+  scroll_depth: number;
+  element_selector?: string;
+  element_text?: string;
+  timestamp: number;
+}
+
+export interface HeatmapBatch {
+  userId: string;
+  events: HeatmapEvent[];
+  metadata: {
+    hostname: string;
+    language?: string;
+  };
+}
+
+// One frozen DOM snapshot (rrweb Meta + FullSnapshot events) for the heatmap backdrop.
+// device_type is derived server-side from viewport + UA so it matches heatmap_events.
+export interface HeatmapSnapshotPayload {
+  pathname: string;
+  page_width: number;
+  page_height: number;
+  viewport_width: number;
+  viewport_height: number;
+  events: SessionReplayEvent[];
 }

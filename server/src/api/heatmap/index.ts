@@ -1,0 +1,9 @@
+export { recordHeatmap } from "./recordHeatmap.js";
+export { recordHeatmapSnapshot } from "./recordSnapshot.js";
+export { getClickHeatmap } from "./getClickHeatmap.js";
+export { getAttentionMap } from "./getAttentionMap.js";
+export { getScrollMap } from "./getScrollMap.js";
+export { getRankedElements } from "./getRankedElements.js";
+export { getClickInsights } from "./getClickInsights.js";
+export { getHeatmapSnapshot } from "./getHeatmapSnapshot.js";
+export { getHeatmapPages } from "./getHeatmapPages.js";

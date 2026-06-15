@@ -88,6 +88,8 @@ export const sites = pgTable(
     trackButtonClicks: boolean().default(false),
     trackCopy: boolean().default(false),
     trackFormInteractions: boolean().default(false),
+    enableHeatmaps: boolean().default(false),
+    heatmapSampleRate: integer().default(100),
     apiKey: text("api_key"), // Format: rb_{64_hex_chars} = 67 chars total
     privateLinkKey: text("private_link_key"),
     tags: jsonb("tags").default([]).$type<string[]>(),
