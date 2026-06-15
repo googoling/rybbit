@@ -133,7 +133,7 @@
     }
   }
   async function parseScriptConfig(scriptTag) {
-    const src = scriptTag.getAttribute("src");
+    const src = scriptTag.getAttribute("src") || scriptTag.getAttribute("data-src");
     if (!src) {
       console.error("Script src attribute is missing");
       return null;
@@ -199,6 +199,8 @@
       trackButtonClicks: false,
       trackCopy: false,
       trackFormInteractions: false,
+      enableHeatmaps: false,
+      heatmapSampleRate: 100,
       tag,
       featureFlags: {},
       // rrweb session replay options (undefined means use rrweb defaults)
@@ -236,7 +238,9 @@
           enableSessionReplay: apiConfig.sessionReplay ?? defaultConfig.enableSessionReplay,
           trackButtonClicks: apiConfig.trackButtonClicks ?? defaultConfig.trackButtonClicks,
           trackCopy: apiConfig.trackCopy ?? defaultConfig.trackCopy,
-          trackFormInteractions: apiConfig.trackFormInteractions ?? defaultConfig.trackFormInteractions
+          trackFormInteractions: apiConfig.trackFormInteractions ?? defaultConfig.trackFormInteractions,
+          enableHeatmaps: apiConfig.enableHeatmaps ?? defaultConfig.enableHeatmaps,
+          heatmapSampleRate: apiConfig.heatmapSampleRate ?? defaultConfig.heatmapSampleRate
         };
       } else {
         console.warn("Failed to fetch tracking config from API, using defaults");
@@ -1467,9 +1471,569 @@
     }
   };
 
+  // heatmapTracking.ts
+  var SAMPLE_STORAGE_KEY2 = "rybbit-heatmap-sampled";
+  var BATCH_SIZE = 30;
+  var BATCH_INTERVAL = 5e3;
+  var SELECTOR_MAX_DEPTH = 5;
+  var ELEMENT_TEXT_MAX_LENGTH = 100;
+  var MAX_EVENTS_PER_BATCH = 200;
+  var RAGE_RADIUS_PX = 30;
+  var RAGE_WINDOW_MS = 1500;
+  var RAGE_THRESHOLD = 3;
+  var DEAD_CHECK_MS = 700;
+  var INTERACTIVE_ANCESTOR_DEPTH = 4;
+  var INTERACTIVE_TAGS = /* @__PURE__ */ new Set(["A", "BUTTON", "INPUT", "SELECT", "TEXTAREA", "LABEL", "SUMMARY", "OPTION"]);
+  var INTERACTIVE_ROLES = /* @__PURE__ */ new Set(["button", "link", "tab", "menuitem", "checkbox", "radio", "switch", "option"]);
+  var MOVE_SAMPLE_MS = 100;
+  var MOVE_MIN_DELTA_PX = 4;
+  var MAX_MOVE_SAMPLES = 600;
+  function isInteractive(element) {
+    let current = element;
+    let depth = 0;
+    while (current && depth < INTERACTIVE_ANCESTOR_DEPTH) {
+      if (INTERACTIVE_TAGS.has(current.tagName)) return true;
+      const role = current.getAttribute("role");
+      if (role && INTERACTIVE_ROLES.has(role)) return true;
+      if (current.hasAttribute("onclick")) return true;
+      if (current.isContentEditable) return true;
+      const tabindex = current.getAttribute("tabindex");
+      if (tabindex !== null && tabindex !== "-1") return true;
+      current = current.parentElement;
+      depth++;
+    }
+    return false;
+  }
+  function shouldSampleSession2(sampleRate) {
+    if (sampleRate >= 100) return true;
+    if (sampleRate <= 0) return false;
+    try {
+      const existingDecision = sessionStorage.getItem(SAMPLE_STORAGE_KEY2);
+      if (existingDecision !== null) {
+        return existingDecision === "1";
+      }
+      const sampled = Math.random() * 100 < sampleRate;
+      sessionStorage.setItem(SAMPLE_STORAGE_KEY2, sampled ? "1" : "0");
+      return sampled;
+    } catch {
+      return Math.random() * 100 < sampleRate;
+    }
+  }
+  function clamp(value, min, max) {
+    return Math.min(max, Math.max(min, value));
+  }
+  var HeatmapTrackingManager = class {
+    constructor(tracker, config) {
+      this.active = false;
+      this.eventBuffer = [];
+      this.maxScrollDepth = 0;
+      this.recentClicks = [];
+      this.rageCooldownUntil = 0;
+      this.lastMutationAt = 0;
+      this.lastMoveX = 0;
+      this.lastMoveY = 0;
+      this.lastMoveAt = 0;
+      this.lastMoveEmitAt = 0;
+      this.lastEmitX = -9999;
+      this.lastEmitY = -9999;
+      this.moveSampleCount = 0;
+      this.cachedPageWidth = 0;
+      this.cachedPageHeight = 0;
+      this.tracker = tracker;
+      this.config = config;
+      this.boundHandleClick = this.handleClick.bind(this);
+      this.boundHandleScroll = debounce(this.handleScroll.bind(this), this.config.debounceDuration || 500);
+      this.boundHandleMouseMove = this.handleMouseMove.bind(this);
+      this.boundRefreshPageDims = this.refreshPageDims.bind(this);
+      this.boundHandleVisibilityChange = this.handleVisibilityChange.bind(this);
+      this.boundFlush = this.flushOnExit.bind(this);
+    }
+    initialize() {
+      if (!this.config.enableHeatmaps) {
+        return;
+      }
+      if (this.active) {
+        return;
+      }
+      const sampleRate = this.config.heatmapSampleRate;
+      if (sampleRate !== void 0 && !shouldSampleSession2(sampleRate)) {
+        return;
+      }
+      this.active = true;
+      document.addEventListener("click", this.boundHandleClick, true);
+      window.addEventListener("scroll", this.boundHandleScroll, { passive: true });
+      document.addEventListener("visibilitychange", this.boundHandleVisibilityChange);
+      window.addEventListener("pagehide", this.boundFlush);
+      this.refreshPageDims();
+      window.addEventListener("mousemove", this.boundHandleMouseMove, { passive: true });
+      window.addEventListener("resize", this.boundRefreshPageDims, { passive: true });
+      if (typeof ResizeObserver !== "undefined") {
+        this.dimsObserver = new ResizeObserver(this.boundRefreshPageDims);
+        this.dimsObserver.observe(document.documentElement);
+      }
+      this.moveTimer = window.setInterval(() => this.sampleMove(), MOVE_SAMPLE_MS);
+      if (typeof MutationObserver !== "undefined") {
+        this.mutationObserver = new MutationObserver(() => {
+          this.lastMutationAt = Date.now();
+        });
+        this.mutationObserver.observe(document.documentElement, {
+          childList: true,
+          subtree: true,
+          attributes: true,
+          characterData: true
+        });
+      }
+      this.setupBatchTimer();
+    }
+    getPathname() {
+      const url = new URL(window.location.href);
+      if (url.hash && url.hash.startsWith("#/")) {
+        return url.hash.substring(1);
+      }
+      return url.pathname;
+    }
+    handleClick(event) {
+      if (!this.active) return;
+      const pageWidth = document.documentElement.scrollWidth;
+      const pageHeight = document.documentElement.scrollHeight;
+      if (pageWidth <= 0 || pageHeight <= 0) return;
+      const xPercent = clamp(event.pageX / pageWidth * 100, 0, 100);
+      const scrollDepth = clamp((window.scrollY + window.innerHeight) / pageHeight * 100, 0, 100);
+      if (scrollDepth > this.maxScrollDepth) {
+        this.maxScrollDepth = scrollDepth;
+      }
+      const target = event.target;
+      const now = Date.now();
+      const context = {
+        pathname: this.getPathname(),
+        x_percent: xPercent,
+        y_absolute: Math.round(event.pageY),
+        viewport_width: Math.round(window.innerWidth),
+        viewport_height: Math.round(window.innerHeight),
+        page_width: Math.round(pageWidth),
+        page_height: Math.round(pageHeight),
+        scroll_depth: Math.round(scrollDepth),
+        element_selector: target ? this.buildSelector(target) : "",
+        element_text: target ? this.getElementText(target) : ""
+      };
+      this.addEvent({ type: "click", ...context, timestamp: now });
+      this.detectRageClick(event, context, now);
+      this.detectDeadClick(target, context, now);
+    }
+    // Emit one "rage" marker per burst of rapid clicks landing in the same spot.
+    detectRageClick(event, context, now) {
+      this.recentClicks = this.recentClicks.filter((c2) => now - c2.t <= RAGE_WINDOW_MS);
+      this.recentClicks.push({ x: event.pageX, y: event.pageY, t: now });
+      const nearby = this.recentClicks.filter(
+        (c2) => Math.abs(c2.x - event.pageX) <= RAGE_RADIUS_PX && Math.abs(c2.y - event.pageY) <= RAGE_RADIUS_PX
+      );
+      if (nearby.length >= RAGE_THRESHOLD && now >= this.rageCooldownUntil) {
+        this.rageCooldownUntil = now + RAGE_WINDOW_MS;
+        this.addEvent({ type: "rage", ...context, timestamp: now });
+      }
+    }
+    // Emit a "dead" marker if a click on a non-interactive element produced no DOM change.
+    detectDeadClick(target, context, clickedAt) {
+      if (isInteractive(target)) return;
+      window.setTimeout(() => {
+        if (!this.active) return;
+        if (this.lastMutationAt > clickedAt) return;
+        if (document.visibilityState !== "visible") return;
+        this.addEvent({ type: "dead", ...context, timestamp: clickedAt });
+      }, DEAD_CHECK_MS);
+    }
+    handleScroll() {
+      if (!this.active) return;
+      const pageHeight = document.documentElement.scrollHeight;
+      if (pageHeight <= 0) return;
+      const scrollDepth = clamp((window.scrollY + window.innerHeight) / pageHeight * 100, 0, 100);
+      if (scrollDepth > this.maxScrollDepth) {
+        this.maxScrollDepth = scrollDepth;
+      }
+    }
+    // Cheap pointer tracking: just record the latest position; the timer does the work.
+    handleMouseMove(event) {
+      if (!this.active) return;
+      this.lastMoveX = event.pageX;
+      this.lastMoveY = event.pageY;
+      this.lastMoveAt = Date.now();
+    }
+    // Cache page dimensions so the high-frequency move sampler never forces a reflow.
+    refreshPageDims() {
+      this.cachedPageWidth = document.documentElement.scrollWidth;
+      this.cachedPageHeight = document.documentElement.scrollHeight;
+    }
+    // Emit at most one cursor sample per tick, and only when the pointer actually
+    // moved since the last sample — throttles mousemove to ~10/s and skips parked
+    // cursors, while lingering produces repeated nearby samples (dwell weighting).
+    sampleMove() {
+      if (!this.active || this.moveSampleCount >= MAX_MOVE_SAMPLES) return;
+      if (document.visibilityState !== "visible") return;
+      if (this.lastMoveAt <= this.lastMoveEmitAt) return;
+      if (Math.abs(this.lastMoveX - this.lastEmitX) < MOVE_MIN_DELTA_PX && Math.abs(this.lastMoveY - this.lastEmitY) < MOVE_MIN_DELTA_PX) {
+        return;
+      }
+      const pageWidth = this.cachedPageWidth || document.documentElement.scrollWidth;
+      const pageHeight = this.cachedPageHeight || document.documentElement.scrollHeight;
+      if (pageWidth <= 0 || pageHeight <= 0) return;
+      const now = Date.now();
+      this.lastMoveEmitAt = now;
+      this.lastEmitX = this.lastMoveX;
+      this.lastEmitY = this.lastMoveY;
+      this.moveSampleCount++;
+      const scrollDepth = clamp((window.scrollY + window.innerHeight) / pageHeight * 100, 0, 100);
+      this.addEvent({
+        type: "move",
+        pathname: this.getPathname(),
+        x_percent: clamp(this.lastMoveX / pageWidth * 100, 0, 100),
+        y_absolute: Math.round(this.lastMoveY),
+        viewport_width: Math.round(window.innerWidth),
+        viewport_height: Math.round(window.innerHeight),
+        page_width: Math.round(pageWidth),
+        page_height: Math.round(pageHeight),
+        scroll_depth: Math.round(scrollDepth),
+        element_selector: "",
+        element_text: "",
+        timestamp: now
+      });
+    }
+    // Build a stable-ish CSS selector by walking ancestors up to body.
+    buildSelector(element) {
+      const parts = [];
+      let current = element;
+      let depth = 0;
+      while (current && current !== document.body && depth < SELECTOR_MAX_DEPTH) {
+        const tag = current.tagName.toLowerCase();
+        if (current.id) {
+          parts.unshift(`${tag}#${current.id}`);
+          break;
+        }
+        const parent = current.parentElement;
+        if (parent) {
+          const sameTag = Array.from(parent.children).filter((child) => child.tagName === current.tagName);
+          if (sameTag.length > 1) {
+            const index = sameTag.indexOf(current) + 1;
+            parts.unshift(`${tag}:nth-of-type(${index})`);
+          } else {
+            parts.unshift(tag);
+          }
+        } else {
+          parts.unshift(tag);
+        }
+        current = parent;
+        depth++;
+      }
+      return parts.join(" > ").slice(0, 1024);
+    }
+    getElementText(element) {
+      return element.textContent?.trim().substring(0, ELEMENT_TEXT_MAX_LENGTH) || "";
+    }
+    addEvent(event) {
+      this.eventBuffer.push(event);
+      if (this.eventBuffer.length >= BATCH_SIZE) {
+        this.flushEvents();
+      }
+    }
+    emitScrollEvent() {
+      if (this.maxScrollDepth <= 0) return;
+      const pageWidth = document.documentElement.scrollWidth;
+      const pageHeight = document.documentElement.scrollHeight;
+      this.eventBuffer.push({
+        type: "scroll",
+        pathname: this.getPathname(),
+        x_percent: 0,
+        y_absolute: 0,
+        viewport_width: Math.round(window.innerWidth),
+        viewport_height: Math.round(window.innerHeight),
+        page_width: Math.round(pageWidth),
+        page_height: Math.round(pageHeight),
+        scroll_depth: Math.round(this.maxScrollDepth),
+        timestamp: Date.now()
+      });
+      this.maxScrollDepth = 0;
+    }
+    setupBatchTimer() {
+      this.clearBatchTimer();
+      this.batchTimer = window.setInterval(() => {
+        if (this.eventBuffer.length > 0) {
+          this.flushEvents();
+        }
+      }, BATCH_INTERVAL);
+    }
+    clearBatchTimer() {
+      if (this.batchTimer) {
+        clearInterval(this.batchTimer);
+        this.batchTimer = void 0;
+      }
+    }
+    buildBatch(events) {
+      return {
+        userId: this.tracker.getUserId() || "",
+        events,
+        metadata: {
+          hostname: window.location.hostname,
+          language: navigator.language
+        }
+      };
+    }
+    flushEvents() {
+      while (this.eventBuffer.length > 0) {
+        const events = this.eventBuffer.splice(0, MAX_EVENTS_PER_BATCH);
+        this.sendBatch(this.buildBatch(events), false);
+      }
+    }
+    // Emit the running scroll depth then drain the buffer; called on page exit.
+    flushOnExit() {
+      if (!this.active) return;
+      this.emitScrollEvent();
+      while (this.eventBuffer.length > 0) {
+        const events = this.eventBuffer.splice(0, MAX_EVENTS_PER_BATCH);
+        this.sendBatch(this.buildBatch(events), true);
+      }
+    }
+    handleVisibilityChange() {
+      if (document.visibilityState === "hidden") {
+        this.flushOnExit();
+      }
+    }
+    sendBatch(batch, keepalive) {
+      try {
+        fetch(`${this.config.analyticsHost}/heatmap/record/${this.config.siteId}`, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json"
+          },
+          body: JSON.stringify(batch),
+          mode: "cors",
+          keepalive
+        }).catch(() => {
+        });
+      } catch {
+      }
+    }
+    cleanup() {
+      if (!this.active) return;
+      document.removeEventListener("click", this.boundHandleClick, true);
+      window.removeEventListener("scroll", this.boundHandleScroll);
+      window.removeEventListener("mousemove", this.boundHandleMouseMove);
+      window.removeEventListener("resize", this.boundRefreshPageDims);
+      document.removeEventListener("visibilitychange", this.boundHandleVisibilityChange);
+      window.removeEventListener("pagehide", this.boundFlush);
+      this.mutationObserver?.disconnect();
+      this.mutationObserver = void 0;
+      this.recentClicks = [];
+      if (this.moveTimer) {
+        clearInterval(this.moveTimer);
+        this.moveTimer = void 0;
+      }
+      this.dimsObserver?.disconnect();
+      this.dimsObserver = void 0;
+      this.clearBatchTimer();
+      this.flushOnExit();
+      this.active = false;
+    }
+  };
+
+  // heatmapSnapshot.ts
+  var SAMPLE_STORAGE_KEY3 = "rybbit-heatmap-sampled";
+  var LOCAL_TS_PREFIX = "rybbit-hm-snap-ts:";
+  var SNAPSHOT_TTL_MS = 7 * 24 * 60 * 60 * 1e3;
+  var CAPTURE_DELAY_MS = 4500;
+  var MAX_PAYLOAD_BYTES = 8e6;
+  var STOP_TIMEOUT_MS = 8e3;
+  var RRWEB_FULL_SNAPSHOT = 2;
+  var HeatmapSnapshotManager = class {
+    // paths attempted this page-load (in-memory)
+    constructor(config) {
+      this.active = false;
+      this.sent = false;
+      this.attempted = /* @__PURE__ */ new Set();
+      this.config = config;
+    }
+    initialize() {
+      if (!this.config.enableHeatmaps) return;
+      try {
+        if (sessionStorage.getItem(SAMPLE_STORAGE_KEY3) === "0") return;
+      } catch {
+      }
+      this.active = true;
+      this.diag("init");
+      this.scheduleCapture();
+    }
+    // Lightweight diagnostic beacon so capture failures are visible in the server logs.
+    // Body stays tiny, so keepalive is safe here.
+    diag(stage) {
+      try {
+        fetch(`${this.config.analyticsHost}/heatmap/snapshot/${this.config.siteId}`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ diag: stage, pathname: this.getPathname() }),
+          mode: "cors",
+          keepalive: true
+        }).catch(() => {
+        });
+      } catch {
+      }
+    }
+    getPathname() {
+      const url = new URL(window.location.href);
+      if (url.hash && url.hash.startsWith("#/")) {
+        return url.hash.substring(1);
+      }
+      return url.pathname;
+    }
+    alreadyCaptured(path) {
+      if (this.attempted.has(path)) return true;
+      try {
+        const ts = localStorage.getItem(LOCAL_TS_PREFIX + path);
+        if (ts && Date.now() - Number(ts) < SNAPSHOT_TTL_MS) return true;
+      } catch {
+      }
+      return false;
+    }
+    // Persist ONLY on success; a failed attempt leaves no marker so the next page load retries.
+    markPersisted(path) {
+      try {
+        localStorage.setItem(LOCAL_TS_PREFIX + path, String(Date.now()));
+      } catch {
+      }
+    }
+    scheduleCapture() {
+      const run = () => window.setTimeout(() => this.capture(), CAPTURE_DELAY_MS);
+      if (document.readyState === "complete") {
+        run();
+      } else {
+        window.addEventListener("load", run, { once: true });
+      }
+    }
+    async capture() {
+      if (!this.active) return;
+      const path = this.getPathname();
+      if (this.alreadyCaptured(path)) return;
+      this.attempted.add(path);
+      this.diag("capture");
+      try {
+        await this.loadRrweb();
+      } catch {
+        this.diag("rrweb-load-fail");
+        return;
+      }
+      this.takeSnapshot(path);
+    }
+    loadRrweb() {
+      if (window.rrweb?.record) return Promise.resolve();
+      return new Promise((resolve, reject) => {
+        const script = document.createElement("script");
+        script.src = `${this.config.analyticsHost}/replay.js`;
+        script.async = false;
+        script.onload = () => resolve();
+        script.onerror = () => reject(new Error("Failed to load rrweb"));
+        document.head.appendChild(script);
+      });
+    }
+    takeSnapshot(path) {
+      const rrweb = window.rrweb;
+      if (!rrweb?.record) {
+        this.diag("no-rrweb-record");
+        return;
+      }
+      const events = [];
+      const finish = () => {
+        if (this.stopRecordingFn) {
+          try {
+            this.stopRecordingFn();
+          } catch {
+          }
+          this.stopRecordingFn = void 0;
+        }
+        if (this.sent) return;
+        if (events.some((e2) => e2.type === RRWEB_FULL_SNAPSHOT)) {
+          this.sent = true;
+          this.send(path, events);
+        } else {
+          this.diag("no-fullsnapshot");
+        }
+      };
+      try {
+        this.stopRecordingFn = rrweb.record({
+          emit: (event) => {
+            events.push({ type: event.type, data: event.data, timestamp: event.timestamp || Date.now() });
+            if (event.type === RRWEB_FULL_SNAPSHOT) {
+              window.setTimeout(finish, 0);
+            }
+          },
+          recordCanvas: false,
+          collectFonts: false,
+          // Inline images as data URLs so the backdrop renders without cross-origin fetches
+          // (decorai.io blocks its assets from loading inside the dashboard's iframe).
+          inlineImages: true,
+          // Privacy: mask inputs by default; honor the site's replay block/ignore/mask classes.
+          maskAllInputs: this.config.sessionReplayMaskAllInputs ?? true,
+          maskInputOptions: this.config.sessionReplayMaskInputOptions ?? { password: true, email: true },
+          blockClass: this.config.sessionReplayBlockClass ?? "rr-block",
+          blockSelector: this.config.sessionReplayBlockSelector ?? null,
+          ignoreClass: this.config.sessionReplayIgnoreClass ?? "rr-ignore",
+          maskTextClass: this.config.sessionReplayMaskTextClass ?? "rr-mask",
+          // A static backdrop needs no interactions; drop scripts/comments to shrink the blob.
+          sampling: { mousemove: false, scroll: 0, input: "last" },
+          slimDOMOptions: { script: true, comment: true, headWhitespace: true }
+        });
+      } catch {
+        this.diag("record-threw");
+        return;
+      }
+      window.setTimeout(finish, STOP_TIMEOUT_MS);
+    }
+    send(path, events) {
+      let body;
+      try {
+        body = JSON.stringify({
+          pathname: path,
+          page_width: Math.round(document.documentElement.scrollWidth),
+          page_height: Math.round(document.documentElement.scrollHeight),
+          viewport_width: Math.round(window.innerWidth),
+          viewport_height: Math.round(window.innerHeight),
+          events
+        });
+      } catch {
+        this.diag("stringify-fail");
+        return;
+      }
+      if (body.length > MAX_PAYLOAD_BYTES) {
+        this.diag("client-too-large:" + body.length);
+        return;
+      }
+      try {
+        fetch(`${this.config.analyticsHost}/heatmap/snapshot/${this.config.siteId}`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body,
+          mode: "cors"
+        }).then((res) => {
+          if (res.ok) this.markPersisted(path);
+          else this.diag("send-status-" + res.status);
+        }).catch(() => this.diag("send-fetch-fail"));
+      } catch {
+      }
+    }
+    cleanup() {
+      this.active = false;
+      if (this.stopRecordingFn) {
+        try {
+          this.stopRecordingFn();
+        } catch {
+        }
+        this.stopRecordingFn = void 0;
+      }
+    }
+  };
+
   // index.ts
   (async function() {
-    const scriptTag = document.currentScript;
+    let scriptTag = document.currentScript;
+    if (!scriptTag || !scriptTag.getAttribute("data-site-id")) {
+      scriptTag = document.querySelector("script[data-site-id]") || document.querySelector('script[src*="/script.js"]') || scriptTag;
+    }
     if (!scriptTag) {
       console.error("Could not find current script tag");
       return;
@@ -1543,6 +2107,8 @@
     let clickManager = null;
     let copyManager = null;
     let formManager = null;
+    let heatmapManager = null;
+    let heatmapSnapshotManager = null;
     if (config.trackButtonClicks) {
       clickManager = new ClickTrackingManager(tracker, config);
       clickManager.initialize();
@@ -1554,6 +2120,12 @@
     if (config.trackFormInteractions) {
       formManager = new FormTrackingManager(tracker, config);
       formManager.initialize();
+    }
+    if (config.enableHeatmaps) {
+      heatmapManager = new HeatmapTrackingManager(tracker, config);
+      heatmapManager.initialize();
+      heatmapSnapshotManager = new HeatmapSnapshotManager(config);
+      heatmapSnapshotManager.initialize();
     }
     if (config.trackErrors) {
       window.addEventListener("error", (event) => {
@@ -1648,6 +2220,8 @@
     window.addEventListener("beforeunload", () => {
       clickManager?.cleanup();
       copyManager?.cleanup();
+      heatmapManager?.cleanup();
+      heatmapSnapshotManager?.cleanup();
       tracker.cleanup();
     });
     if (config.autoTrackPageview) {
