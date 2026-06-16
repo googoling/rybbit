@@ -17,13 +17,13 @@ interface HeatmapElementListProps {
 export function HeatmapElementList({ title, rows, emptyLabel }: HeatmapElementListProps) {
   return (
     <div className="rounded-lg border border-neutral-200 dark:border-neutral-800 bg-white dark:bg-neutral-900">
-      <div className="px-3 py-2 border-b border-neutral-150 dark:border-neutral-850 text-sm font-medium text-neutral-700 dark:text-neutral-200">
+      <div className="px-3 py-2 border-b border-neutral-200 dark:border-neutral-800 text-sm font-medium text-neutral-700 dark:text-neutral-200">
         {title}
       </div>
       {rows.length === 0 ? (
         <div className="px-3 py-4 text-xs text-neutral-500 dark:text-neutral-400">{emptyLabel}</div>
       ) : (
-        <ul className="divide-y divide-neutral-100 dark:divide-neutral-850">
+        <ul className="divide-y divide-neutral-100 dark:divide-neutral-800">
           {rows.map((row, index) => (
             <li key={`${row.selector}-${index}`} className="px-3 py-2 flex items-center gap-2">
               <span className="text-xs text-neutral-400 w-5 shrink-0">{index + 1}</span>

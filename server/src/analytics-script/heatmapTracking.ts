@@ -177,6 +177,18 @@ export class HeatmapTrackingManager {
     return url.pathname;
   }
 
+  private getYAbsolute(event: MouseEvent, target: HTMLElement | null): number {
+    if (target) {
+      let el: HTMLElement | null = target;
+      while (el && el !== document.documentElement) {
+        const pos = window.getComputedStyle(el).position;
+        if (pos === "fixed" || pos === "sticky") return Math.round(event.clientY);
+        el = el.parentElement;
+      }
+    }
+    return Math.round(event.pageY);
+  }
+
   private handleClick(event: MouseEvent): void {
     if (!this.active) return;
 
@@ -197,7 +209,7 @@ export class HeatmapTrackingManager {
     const context = {
       pathname: this.getPathname(),
       x_percent: xPercent,
-      y_absolute: Math.round(event.pageY),
+      y_absolute: this.getYAbsolute(event, target),
       viewport_width: Math.round(window.innerWidth),
       viewport_height: Math.round(window.innerHeight),
       page_width: Math.round(pageWidth),

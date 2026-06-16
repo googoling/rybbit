@@ -6,4 +6,5 @@ export { getScrollMap } from "./getScrollMap.js";
 export { getRankedElements } from "./getRankedElements.js";
 export { getClickInsights } from "./getClickInsights.js";
 export { getHeatmapSnapshot } from "./getHeatmapSnapshot.js";
+export { getHeatmapSnapshots } from "./getHeatmapSnapshots.js";
 export { getHeatmapPages } from "./getHeatmapPages.js";

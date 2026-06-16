@@ -8,49 +8,98 @@ export type GetHeatmapSnapshotResponse = {
   pageWidth: number;
   pageHeight: number;
   capturedAt: string | null;
+  capturedDevice: string | null;
 };
 
 export interface GetHeatmapSnapshotRequest {
   Params: { siteId: string };
   Querystring: FilterParams<{
     pathname: string;
+    hostname?: string;
     device?: string;
+    capturedAt?: string;
   }>;
 }
 
 // Latest frozen DOM snapshot for a page/device — the heatmap backdrop. Tiny + cached hard.
 export async function getHeatmapSnapshot(req: FastifyRequest<GetHeatmapSnapshotRequest>, res: FastifyReply) {
-  const { pathname, device } = req.query;
+  const { pathname, hostname, device, capturedAt } = req.query;
   const site = req.params.siteId;
 
   if (!pathname) {
     return res.status(400).send({ error: "pathname is required" });
   }
 
-  // ReplacingMergeTree: ORDER BY captured_at DESC LIMIT 1 returns the newest even pre-merge.
-  const query = `
-    SELECT snapshot, page_width AS pageWidth, page_height AS pageHeight, toString(captured_at) AS capturedAt
+  const baseParams = { siteId: Number(site), pathname, ...(hostname ? { hostname } : {}) };
+  const baseParamsNoHost = { siteId: Number(site), pathname };
+
+  type Row = { snapshot: string; pageWidth: number; pageHeight: number; capturedAt: string; capturedDevice: string };
+
+  // If a specific snapshot timestamp is requested, fetch it directly (no fallback chain needed).
+  if (capturedAt) {
+    try {
+      const result = await clickhouse.query({
+        query: `
+          SELECT snapshot, page_width AS pageWidth, page_height AS pageHeight, toString(captured_at) AS capturedAt, device_type AS capturedDevice
+          FROM heatmap_snapshots
+          WHERE site_id = {siteId:Int32}
+            AND pathname = {pathname:String}
+            AND captured_at = {capturedAt:String}
+          LIMIT 1
+        `,
+        format: "JSONEachRow",
+        query_params: { siteId: Number(site), pathname, capturedAt },
+      });
+      const rows = await processResults<Row>(result);
+      const row = rows[0];
+      let events: any[] = [];
+      if (row?.snapshot) {
+        try { events = JSON.parse(row.snapshot); } catch {}
+      }
+      return res.send({
+        data: {
+          events,
+          pageWidth: row?.pageWidth ?? 0,
+          pageHeight: row?.pageHeight ?? 0,
+          capturedAt: row?.capturedAt ?? null,
+          capturedDevice: row?.capturedDevice ?? null,
+        },
+      });
+    } catch (error) {
+      console.error("Error fetching heatmap snapshot by capturedAt:", error);
+      return res.status(500).send({ error: "Failed to fetch snapshot" });
+    }
+  }
+
+  const buildQuery = (withHostname: boolean, deviceFilter: boolean) => `
+    SELECT snapshot, page_width AS pageWidth, page_height AS pageHeight, toString(captured_at) AS capturedAt, device_type AS capturedDevice
     FROM heatmap_snapshots
     WHERE site_id = {siteId:Int32}
       AND pathname = {pathname:String}
-      ${device ? "AND device_type = {device:String}" : ""}
+      ${withHostname && hostname ? "AND hostname = {hostname:String}" : ""}
+      ${deviceFilter ? "AND device_type = {device:String}" : ""}
     ORDER BY captured_at DESC
     LIMIT 1
   `;
 
   try {
-    const result = await clickhouse.query({
-      query,
-      format: "JSONEachRow",
-      query_params: { siteId: Number(site), pathname, ...(device ? { device } : {}) },
-    });
+    const tryQuery = async (withHostname: boolean, deviceFilter?: string) => {
+      const params = withHostname ? baseParams : baseParamsNoHost;
+      const result = await clickhouse.query({
+        query: buildQuery(withHostname, !!deviceFilter),
+        format: "JSONEachRow",
+        query_params: { ...params, ...(deviceFilter ? { device: deviceFilter } : {}) },
+      });
+      return processResults<Row>(result);
+    };
 
-    const rows = await processResults<{
-      snapshot: string;
-      pageWidth: number;
-      pageHeight: number;
-      capturedAt: string;
-    }>(result);
+    // 1. Exact match: hostname + device
+    // 2. Any device for this hostname
+    // 3. Any device, any hostname (catches old empty-hostname captures)
+    let rows = device ? await tryQuery(true, device) : await tryQuery(true);
+    if (!rows.length && device) rows = await tryQuery(true);
+    if (!rows.length) rows = await tryQuery(false, device);
+    if (!rows.length && device) rows = await tryQuery(false);
 
     const row = rows[0];
     let events: any[] = [];
@@ -68,6 +117,7 @@ export async function getHeatmapSnapshot(req: FastifyRequest<GetHeatmapSnapshotR
         pageWidth: row?.pageWidth ?? 0,
         pageHeight: row?.pageHeight ?? 0,
         capturedAt: row?.capturedAt ?? null,
+        capturedDevice: row?.capturedDevice ?? null,
       },
     });
   } catch (error) {

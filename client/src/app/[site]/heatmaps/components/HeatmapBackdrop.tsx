@@ -5,22 +5,19 @@ import { createCache, createMirror, rebuild } from "rrweb-snapshot";
 
 interface HeatmapBackdropProps {
   events: any[];
-  // Coordinate space the heat canvas uses (page content dimensions).
   baseWidth: number;
   baseHeight: number;
+  onHeightChange?: (h: number) => void;
 }
 
 const RRWEB_FULL_SNAPSHOT = 2;
 
-// Renders the captured page as a static, non-interactive backdrop by rebuilding the rrweb
-// full-snapshot DOM directly into a sandboxed iframe (the Clarity approach). No rrweb-player,
-// so there is no internal scaling/controller to fight: the iframe fills the heat coordinate
-// box (baseWidth × baseHeight) 1:1, so the heat canvas overlay lines up exactly. Best-effort —
-// any failure leaves a blank stage and the heat canvas still renders on top.
-export function HeatmapBackdrop({ events, baseWidth, baseHeight }: HeatmapBackdropProps) {
+export function HeatmapBackdrop({ events, baseWidth, baseHeight, onHeightChange }: HeatmapBackdropProps) {
   const containerRef = useRef<HTMLDivElement>(null);
+  const measuredRef = useRef(false);
 
   useEffect(() => {
+    measuredRef.current = false;
     const container = containerRef.current;
     if (!container || !events?.length || baseWidth <= 0 || baseHeight <= 0) return;
 
@@ -39,6 +36,22 @@ export function HeatmapBackdrop({ events, baseWidth, baseHeight }: HeatmapBackdr
       const doc = iframe.contentDocument;
       if (doc) {
         rebuild(full.data.node, { doc, cache: createCache(), mirror: createMirror(), hackCss: true });
+
+        requestAnimationFrame(() => {
+          if (measuredRef.current) return;
+          measuredRef.current = true;
+          try {
+            // Shrink to 1px so min-height:100vh collapses to 1px, revealing true content height.
+            iframe.style.height = "1px";
+            const rendered = doc.documentElement?.scrollHeight ?? 0;
+            // Cap at 3× stored height to prevent broken-CSS pages from exploding.
+            const finalHeight = Math.min(Math.max(baseHeight, rendered), Math.max(baseHeight * 3, 3000));
+            iframe.style.height = `${finalHeight}px`;
+            if (finalHeight > baseHeight + 50 && onHeightChange) {
+              onHeightChange(finalHeight);
+            }
+          } catch {}
+        });
       }
     } catch {
       // Backdrop is an enhancement; ignore failures and keep the heat canvas usable.
@@ -47,7 +60,7 @@ export function HeatmapBackdrop({ events, baseWidth, baseHeight }: HeatmapBackdr
     return () => {
       if (container) container.innerHTML = "";
     };
-  }, [events, baseWidth, baseHeight]);
+  }, [events, baseWidth]);
 
   return (
     <div

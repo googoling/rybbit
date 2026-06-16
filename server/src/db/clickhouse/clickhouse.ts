@@ -242,12 +242,45 @@ export const initializeClickhouse = async () => {
       `
   );
 
-  // One frozen DOM snapshot per (site, path, device) for the heatmap backdrop. Latest wins.
+  // One-time migration: heatmap_snapshots v1 had no hostname column so its ORDER BY can't
+  // scope snapshots per domain. Drop it so the v2 CREATE TABLE below runs fresh.
+  // Snapshots are ephemeral — they regenerate from real visits.
+  try {
+    const _migResult = await clickhouse.query({
+      query: `SELECT count() AS c FROM system.columns WHERE database = currentDatabase() AND table = 'heatmap_snapshots' AND name = 'hostname'`,
+      format: "JSONEachRow",
+    });
+    const _migRows = (await _migResult.json()) as Array<{ c: string }>;
+    if (_migRows[0]?.c === "0") {
+      await clickhouse.exec({ query: "DROP TABLE IF EXISTS heatmap_snapshots" });
+    }
+  } catch {
+    // Best-effort — if check fails, leave the table as-is.
+  }
+
+  // Migration: extend ORDER BY to include captured_at so multiple snapshots per page are retained.
+  try {
+    const _skResult = await clickhouse.query({
+      query: `SELECT sorting_key FROM system.tables WHERE database = currentDatabase() AND name = 'heatmap_snapshots'`,
+      format: "JSONEachRow",
+    });
+    const _skRows = (await _skResult.json()) as Array<{ sorting_key: string }>;
+    if (_skRows.length > 0 && !_skRows[0].sorting_key.includes("captured_at")) {
+      await clickhouse.exec({
+        query: `ALTER TABLE heatmap_snapshots MODIFY ORDER BY (site_id, hostname, pathname, device_type, captured_at)`,
+      });
+    }
+  } catch {
+    // Best-effort — if this fails, snapshot picker shows only one entry per page.
+  }
+
+  // One frozen DOM snapshot per (site, hostname, path, device) for the heatmap backdrop. Latest wins.
   await execClickhouseInitStep(
     "create heatmap_snapshots table",
     `
       CREATE TABLE IF NOT EXISTS heatmap_snapshots (
         site_id UInt16,
+        hostname LowCardinality(String) DEFAULT '',
         pathname String,
         device_type LowCardinality(String) DEFAULT '',
         captured_at DateTime DEFAULT now(),
@@ -259,7 +292,7 @@ export const initializeClickhouse = async () => {
       )
       ENGINE = ReplacingMergeTree(captured_at)
       PARTITION BY toYYYYMM(captured_at)
-      ORDER BY (site_id, pathname, device_type)
+      ORDER BY (site_id, hostname, pathname, device_type)
       TTL toDateTime(captured_at) + INTERVAL 90 DAY
       `
   );

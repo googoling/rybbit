@@ -1592,6 +1592,17 @@
       }
       return url.pathname;
     }
+    getYAbsolute(event, target) {
+      if (target) {
+        let el = target;
+        while (el && el !== document.documentElement) {
+          const pos = window.getComputedStyle(el).position;
+          if (pos === "fixed" || pos === "sticky") return Math.round(event.clientY);
+          el = el.parentElement;
+        }
+      }
+      return Math.round(event.pageY);
+    }
     handleClick(event) {
       if (!this.active) return;
       const pageWidth = document.documentElement.scrollWidth;
@@ -1607,7 +1618,7 @@
       const context = {
         pathname: this.getPathname(),
         x_percent: xPercent,
-        y_absolute: Math.round(event.pageY),
+        y_absolute: this.getYAbsolute(event, target),
         viewport_width: Math.round(window.innerWidth),
         viewport_height: Math.round(window.innerHeight),
         page_width: Math.round(pageWidth),
@@ -1836,7 +1847,7 @@
 
   // heatmapSnapshot.ts
   var SAMPLE_STORAGE_KEY3 = "rybbit-heatmap-sampled";
-  var LOCAL_TS_PREFIX = "rybbit-hm-snap-ts:";
+  var LOCAL_TS_PREFIX = "rybbit-hm-snap-ts-v3:";
   var SNAPSHOT_TTL_MS = 7 * 24 * 60 * 60 * 1e3;
   var CAPTURE_DELAY_MS = 4500;
   var MAX_PAYLOAD_BYTES = 8e6;
@@ -1964,9 +1975,7 @@
           },
           recordCanvas: false,
           collectFonts: false,
-          // Inline images as data URLs so the backdrop renders without cross-origin fetches
-          // (decorai.io blocks its assets from loading inside the dashboard's iframe).
-          inlineImages: true,
+          inlineImages: false,
           // Privacy: mask inputs by default; honor the site's replay block/ignore/mask classes.
           maskAllInputs: this.config.sessionReplayMaskAllInputs ?? true,
           maskInputOptions: this.config.sessionReplayMaskInputOptions ?? { password: true, email: true },
@@ -1989,6 +1998,7 @@
       try {
         body = JSON.stringify({
           pathname: path,
+          hostname: window.location.hostname,
           page_width: Math.round(document.documentElement.scrollWidth),
           page_height: Math.round(document.documentElement.scrollHeight),
           viewport_width: Math.round(window.innerWidth),

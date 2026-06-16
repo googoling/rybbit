@@ -81,6 +81,7 @@ import {
   getScrollMap,
   recordHeatmap,
   recordHeatmapSnapshot,
+  getHeatmapSnapshots,
 } from "./api/heatmap/index.js";
 import { getConfig, getVersion } from "./api/getConfig.js";
 import {
@@ -326,6 +327,7 @@ async function analyticsRoutes(fastify: FastifyInstance) {
   fastify.get("/sites/:siteId/heatmap/elements", publicSite, getRankedElements);
   fastify.get("/sites/:siteId/heatmap/insights", publicSite, getClickInsights);
   fastify.get("/sites/:siteId/heatmap/snapshot", publicSite, getHeatmapSnapshot);
+  fastify.get("/sites/:siteId/heatmap/snapshots", publicSite, getHeatmapSnapshots);
   fastify.get("/sites/:siteId/dashboards", authSite, getDashboards);
   fastify.get("/sites/:siteId/dashboards/:dashboardId", authSite, getDashboard);
   fastify.post("/sites/:siteId/dashboards", authSite, createDashboard);

@@ -20,6 +20,8 @@ export interface RankedElement {
   element_text: string;
   clicks: number;
   percentage: number;
+  avg_x?: number;
+  avg_y?: number;
 }
 
 export type RankedElementsResponse = RankedElement[];
@@ -65,9 +67,19 @@ export interface HeatmapSnapshotResponse {
   pageWidth: number;
   pageHeight: number;
   capturedAt: string | null;
+  capturedDevice: string | null;
+}
+
+// Metadata for listing available snapshots (no blob).
+export interface SnapshotMeta {
+  capturedAt: string;
+  capturedDevice: string;
+  pageWidth: number;
+  pageHeight: number;
 }
 
 export interface HeatmapPageItem {
+  hostname: string;
   pathname: string;
   events: number;
   sessions: number;
@@ -77,6 +89,7 @@ export type HeatmapSegment = "all" | "converters" | "non_converters";
 
 // Page + device + conversion segmentation on top of the shared time/filter params.
 export interface HeatmapParams extends CommonApiParams {
+  hostname?: string;
   pathname: string;
   device?: string;
   goalId?: number | null;
@@ -86,6 +99,7 @@ export interface HeatmapParams extends CommonApiParams {
 function heatmapQuery(params: HeatmapParams) {
   return {
     ...toQueryParams(params),
+    hostname: params.hostname,
     pathname: params.pathname,
     device: params.device,
     goalId: params.goalId ?? undefined,
@@ -147,11 +161,24 @@ export async function fetchClickInsights(site: string | number, params: HeatmapP
 
 export async function fetchHeatmapSnapshot(
   site: string | number,
-  params: { pathname: string; device?: string }
+  params: { hostname?: string; pathname: string; device?: string; capturedAt?: string }
 ): Promise<HeatmapSnapshotResponse> {
   const response = await authedFetch<{ data: HeatmapSnapshotResponse }>(`/sites/${site}/heatmap/snapshot`, {
+    hostname: params.hostname,
     pathname: params.pathname,
     device: params.device,
+    capturedAt: params.capturedAt,
+  });
+  return response.data;
+}
+
+export async function fetchHeatmapSnapshotsList(
+  site: string | number,
+  params: { hostname?: string; pathname: string }
+): Promise<SnapshotMeta[]> {
+  const response = await authedFetch<{ data: SnapshotMeta[] }>(`/sites/${site}/heatmap/snapshots`, {
+    hostname: params.hostname,
+    pathname: params.pathname,
   });
   return response.data;
 }
