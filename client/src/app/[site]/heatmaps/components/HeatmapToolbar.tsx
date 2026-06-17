@@ -93,7 +93,7 @@ function SplitButton({
       <Button variant={active ? "default" : "outline"} size="sm" onClick={onPrimary} className="pr-1.5">
         {icon}
         {label}
-        <DropdownMenuTrigger asChild>
+        <DropdownMenuTrigger asChild unstyled>
           <span role="button" tabIndex={0} aria-label={ariaLabel} onClick={e => e.stopPropagation()}>
             <ChevronDown />
           </span>
