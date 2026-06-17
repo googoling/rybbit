@@ -53,6 +53,8 @@ export async function getSite(request: FastifyRequest<GetSiteParams>, reply: Fas
       trackButtonClicks: site.trackButtonClicks,
       trackCopy: site.trackCopy,
       trackFormInteractions: site.trackFormInteractions,
+      enableHeatmaps: site.enableHeatmaps,
+      heatmapSampleRate: site.heatmapSampleRate,
     });
   } catch (error) {
     console.error("Error retrieving site:", error);

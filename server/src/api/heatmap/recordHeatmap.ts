@@ -22,7 +22,7 @@ const recordHeatmapSchema = z.object({
   events: z
     .array(
       z.object({
-        type: z.enum(["click", "scroll", "rage", "dead", "move"]),
+        type: z.enum(["click", "scroll", "rage", "dead", "move", "error"]),
         pathname: z.string().max(2048),
         x_percent: z.number().min(0).max(100),
         y_absolute: z.number().min(0),

@@ -17,6 +17,7 @@ export interface GetAttentionMapRequest {
   Params: { siteId: string };
   Querystring: FilterParams<{
     pathname: string;
+    hostname?: string;
     device?: string;
     goalId?: string;
     segment?: string;
@@ -25,7 +26,7 @@ export interface GetAttentionMapRequest {
 
 // Mouse-movement (attention) density — same shape as clicks, over dwell-weighted 'move' samples.
 export async function getAttentionMap(req: FastifyRequest<GetAttentionMapRequest>, res: FastifyReply) {
-  const { filters, pathname, device, goalId, segment } = req.query;
+  const { filters, pathname, hostname, device, goalId, segment } = req.query;
   const site = req.params.siteId;
 
   if (!pathname) {
@@ -45,6 +46,7 @@ export async function getAttentionMap(req: FastifyRequest<GetAttentionMapRequest
     site_id = {siteId:Int32}
     AND pathname = {pathname:String}
     AND event_type = 'move'
+    ${hostname ? "AND hostname = {hostname:String}" : ""}
     ${device ? "AND device_type = {device:String}" : ""}
     ${filterStatement}
     ${goalFilter}
@@ -66,13 +68,13 @@ export async function getAttentionMap(req: FastifyRequest<GetAttentionMapRequest
       count() AS totalSamples,
       uniqExact(session_id) AS sessions,
       max(page_height) AS pageHeight,
-      any(page_width) AS pageWidth
+      any(viewport_width) AS pageWidth
     FROM heatmap_events
     WHERE ${whereClause}
   `;
 
   try {
-    const queryParams = { siteId: Number(site), pathname, ...(device ? { device } : {}) };
+    const queryParams = { siteId: Number(site), pathname, ...(hostname ? { hostname } : {}), ...(device ? { device } : {}) };
     const [pointsResult, totalsResult] = await Promise.all([
       clickhouse.query({ query: pointsQuery, format: "JSONEachRow", query_params: queryParams }),
       clickhouse.query({ query: totalsQuery, format: "JSONEachRow", query_params: queryParams }),

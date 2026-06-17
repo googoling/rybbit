@@ -19,6 +19,7 @@ export interface GetClickInsightsRequest {
   Params: { siteId: string };
   Querystring: FilterParams<{
     pathname: string;
+    hostname?: string;
     device?: string;
     goalId?: string;
     segment?: string;
@@ -29,7 +30,7 @@ const TOP_ELEMENTS = 5;
 
 // Rage clicks (frustration bursts) + dead clicks (clicks that did nothing), with hotspots + top elements.
 export async function getClickInsights(req: FastifyRequest<GetClickInsightsRequest>, res: FastifyReply) {
-  const { filters, pathname, device, goalId, segment } = req.query;
+  const { filters, pathname, hostname, device, goalId, segment } = req.query;
   const site = req.params.siteId;
 
   if (!pathname) {
@@ -49,6 +50,7 @@ export async function getClickInsights(req: FastifyRequest<GetClickInsightsReque
     site_id = {siteId:Int32}
     AND pathname = {pathname:String}
     AND event_type IN ('rage', 'dead')
+    ${hostname ? "AND hostname = {hostname:String}" : ""}
     ${device ? "AND device_type = {device:String}" : ""}
     ${filterStatement}
     ${goalFilter}
@@ -79,7 +81,7 @@ export async function getClickInsights(req: FastifyRequest<GetClickInsightsReque
   `;
 
   try {
-    const queryParams = { siteId: Number(site), pathname, ...(device ? { device } : {}) };
+    const queryParams = { siteId: Number(site), pathname, ...(hostname ? { hostname } : {}), ...(device ? { device } : {}) };
     const [pointsResult, elementsResult] = await Promise.all([
       clickhouse.query({ query: pointsQuery, format: "JSONEachRow", query_params: queryParams }),
       clickhouse.query({ query: elementsQuery, format: "JSONEachRow", query_params: queryParams }),

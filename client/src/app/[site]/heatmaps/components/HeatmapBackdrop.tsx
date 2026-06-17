@@ -8,11 +8,12 @@ interface HeatmapBackdropProps {
   baseWidth: number;
   baseHeight: number;
   onHeightChange?: (h: number) => void;
+  onDocReady?: (doc: Document) => void;
 }
 
 const RRWEB_FULL_SNAPSHOT = 2;
 
-export function HeatmapBackdrop({ events, baseWidth, baseHeight, onHeightChange }: HeatmapBackdropProps) {
+export function HeatmapBackdrop({ events, baseWidth, baseHeight, onHeightChange, onDocReady }: HeatmapBackdropProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const measuredRef = useRef(false);
 
@@ -50,6 +51,7 @@ export function HeatmapBackdrop({ events, baseWidth, baseHeight, onHeightChange 
             if (finalHeight > baseHeight + 50 && onHeightChange) {
               onHeightChange(finalHeight);
             }
+            onDocReady?.(doc);
           } catch {}
         });
       }

@@ -1,5 +1,5 @@
 export interface HeatmapEventInput {
-  type: "click" | "scroll" | "rage" | "dead" | "move";
+  type: "click" | "scroll" | "rage" | "dead" | "move" | "error";
   pathname: string;
   x_percent: number;
   y_absolute: number;

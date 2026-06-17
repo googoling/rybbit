@@ -155,6 +155,14 @@ function SidebarContent() {
             />
           )}
         </div>
+        {!isMobileSite && (
+          <SidebarComponents.Item
+            label={t("Heatmaps")}
+            active={isActiveTab("heatmaps")}
+            href={getTabPath("heatmaps")}
+            icon={<Flame className="w-4 h-4" />}
+          />
+        )}
         {/* {!privateKey && (
           <SidebarComponents.Item
             label={t("Feature Flags")}
@@ -208,14 +216,6 @@ function SidebarContent() {
           href={getTabPath("events")}
           icon={<MousePointerClick className="w-4 h-4" />}
         />
-        {!isMobileSite && (
-          <SidebarComponents.Item
-            label={t("Heatmaps")}
-            active={isActiveTab("heatmaps")}
-            href={getTabPath("heatmaps")}
-            icon={<Flame className="w-4 h-4" />}
-          />
-        )}
         <SidebarComponents.Item
           label={t("Errors")}
           active={isActiveTab("errors")}

@@ -10,6 +10,7 @@ import {
   fetchHeatmapSnapshotsList,
   fetchRankedElements,
   fetchScrollMap,
+  HeatmapClickMode,
   HeatmapSegment,
 } from "@/api/analytics/endpoints/heatmap";
 
@@ -19,6 +20,7 @@ interface ViewArgs {
   device?: string;
   goalId?: number | null;
   segment?: HeatmapSegment;
+  mode?: HeatmapClickMode;
   enabled?: boolean;
 }
 
@@ -33,12 +35,12 @@ export function useGetHeatmapPages(device?: string) {
   });
 }
 
-export function useGetClickHeatmap({ hostname, pathname, device, goalId, segment, enabled = true }: ViewArgs) {
+export function useGetClickHeatmap({ hostname, pathname, device, goalId, segment, mode, enabled = true }: ViewArgs) {
   const { time, site, filters } = useStore();
   const params = buildApiParams(time, { filters });
   return useQuery({
-    queryKey: ["heatmap-clicks", site, time, filters, hostname, pathname, device, goalId, segment],
-    queryFn: () => fetchClickHeatmap(site, { ...params, hostname, pathname, device, goalId, segment }),
+    queryKey: ["heatmap-clicks", site, time, filters, hostname, pathname, device, goalId, segment, mode],
+    queryFn: () => fetchClickHeatmap(site, { ...params, hostname, pathname, device, goalId, segment, mode }),
     enabled: !!site && !!pathname && enabled,
     staleTime: Infinity,
   });
@@ -66,12 +68,12 @@ export function useGetScrollMap({ hostname, pathname, device, goalId, segment, e
   });
 }
 
-export function useGetRankedElements({ hostname, pathname, device, goalId, segment, enabled = true }: ViewArgs) {
+export function useGetRankedElements({ hostname, pathname, device, goalId, segment, mode, enabled = true }: ViewArgs) {
   const { time, site, filters } = useStore();
   const params = buildApiParams(time, { filters });
   return useQuery({
-    queryKey: ["heatmap-elements", site, time, filters, hostname, pathname, device, goalId, segment],
-    queryFn: () => fetchRankedElements(site, { ...params, hostname, pathname, device, goalId, segment }),
+    queryKey: ["heatmap-elements", site, time, filters, hostname, pathname, device, goalId, segment, mode],
+    queryFn: () => fetchRankedElements(site, { ...params, hostname, pathname, device, goalId, segment, mode }),
     enabled: !!site && !!pathname && enabled,
     staleTime: Infinity,
   });

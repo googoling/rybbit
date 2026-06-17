@@ -13,6 +13,7 @@ const MAX_SNAPSHOT_BYTES = 9_000_000; // stays under the 10MB Fastify bodyLimit
 
 const recordSnapshotSchema = z.object({
   pathname: z.string().max(2048),
+  hostname: z.string().max(253).default(""),
   page_width: z.number().int().min(0).max(65535),
   page_height: z.number().int().min(0),
   viewport_width: z.number().int().min(0).max(65535),
@@ -74,6 +75,7 @@ export async function recordHeatmapSnapshot(
       values: [
         {
           site_id: siteId,
+          hostname: body.hostname || "",
           pathname: body.pathname,
           device_type: deviceType,
           page_width: body.page_width,

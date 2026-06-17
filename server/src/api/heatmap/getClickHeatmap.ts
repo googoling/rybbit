@@ -18,15 +18,23 @@ export interface GetClickHeatmapRequest {
   };
   Querystring: FilterParams<{
     pathname: string;
+    hostname?: string;
     device?: string;
     goalId?: string;
     segment?: string;
+    mode?: string;
   }>;
 }
 
+type ClickMode = "all" | "first" | "last" | "error";
+function parseMode(raw?: string): ClickMode {
+  return raw === "first" || raw === "last" || raw === "error" ? raw : "all";
+}
+
 export async function getClickHeatmap(req: FastifyRequest<GetClickHeatmapRequest>, res: FastifyReply) {
-  const { filters, pathname, device, goalId, segment } = req.query;
+  const { filters, pathname, hostname, device, goalId, segment } = req.query;
   const site = req.params.siteId;
+  const mode = parseMode(req.query.mode);
 
   if (!pathname) {
     return res.status(400).send({ error: "pathname is required" });
@@ -41,34 +49,52 @@ export async function getClickHeatmap(req: FastifyRequest<GetClickHeatmapRequest
     timeStatement,
   });
 
+  // 'error' reads error-marked clicks; everything else reads plain clicks.
+  const eventType = mode === "error" ? "error" : "click";
+  const whereClause = `
+    site_id = {siteId:Int32}
+    AND pathname = {pathname:String}
+    AND event_type = '${eventType}'
+    ${hostname ? "AND hostname = {hostname:String}" : ""}
+    ${device ? "AND device_type = {device:String}" : ""}
+    ${filterStatement}
+    ${goalFilter}
+    ${timeStatement}
+  `;
+
+  // first/last reduce to one click per session (earliest/latest) before bucketing.
+  const sessionPick = mode === "first" ? "argMin" : "argMax";
+  const source =
+    mode === "first" || mode === "last"
+      ? `(
+          SELECT
+            ${sessionPick}(x_percent, timestamp) AS x_percent,
+            ${sessionPick}(y_absolute, timestamp) AS y_absolute
+          FROM heatmap_events
+          WHERE ${whereClause} AND session_id != ''
+          GROUP BY session_id
+        )`
+      : `heatmap_events WHERE ${whereClause}`;
+
   // Bucket coordinates to keep the rendered payload small (x to 0.5%, y to 8px).
   const pointsQuery = `
     SELECT
       round(x_percent * 2) / 2 AS x_percent,
       floor(y_absolute / 8) * 8 AS y_absolute,
       count() AS count
-    FROM heatmap_events
-    WHERE
-      site_id = {siteId:Int32}
-      AND pathname = {pathname:String}
-      AND event_type = 'click'
-      ${device ? "AND device_type = {device:String}" : ""}
-      ${filterStatement}
-      ${goalFilter}
-      ${timeStatement}
+    FROM ${source}
     GROUP BY x_percent, y_absolute
   `;
 
-  const totalsQuery = `
-    SELECT
-      count() AS totalClicks,
-      max(page_height) AS pageHeight,
-      any(page_width) AS pageWidth
+  // Page dimensions are always derived from plain clicks (stable regardless of mode).
+  const dimsQuery = `
+    SELECT max(page_height) AS pageHeight, any(viewport_width) AS pageWidth
     FROM heatmap_events
     WHERE
       site_id = {siteId:Int32}
       AND pathname = {pathname:String}
       AND event_type = 'click'
+      ${hostname ? "AND hostname = {hostname:String}" : ""}
       ${device ? "AND device_type = {device:String}" : ""}
       ${filterStatement}
       ${goalFilter}
@@ -76,28 +102,22 @@ export async function getClickHeatmap(req: FastifyRequest<GetClickHeatmapRequest
   `;
 
   try {
-    const [pointsResult, totalsResult] = await Promise.all([
-      clickhouse.query({
-        query: pointsQuery,
-        format: "JSONEachRow",
-        query_params: { siteId: Number(site), pathname, ...(device ? { device } : {}) },
-      }),
-      clickhouse.query({
-        query: totalsQuery,
-        format: "JSONEachRow",
-        query_params: { siteId: Number(site), pathname, ...(device ? { device } : {}) },
-      }),
+    const queryParams = { siteId: Number(site), pathname, ...(hostname ? { hostname } : {}), ...(device ? { device } : {}) };
+    const [pointsResult, dimsResult] = await Promise.all([
+      clickhouse.query({ query: pointsQuery, format: "JSONEachRow", query_params: queryParams }),
+      clickhouse.query({ query: dimsQuery, format: "JSONEachRow", query_params: queryParams }),
     ]);
 
     const points = await processResults<GetClickHeatmapResponse["points"][number]>(pointsResult);
-    const totals = await processResults<{ totalClicks: number; pageHeight: number; pageWidth: number }>(totalsResult);
+    const dims = await processResults<{ pageHeight: number; pageWidth: number }>(dimsResult);
+    const totalClicks = points.reduce((s, p) => s + Number(p.count), 0);
 
     return res.send({
       data: {
         points,
-        totalClicks: totals[0]?.totalClicks ?? 0,
-        pageHeight: totals[0]?.pageHeight ?? 0,
-        pageWidth: totals[0]?.pageWidth ?? 0,
+        totalClicks,
+        pageHeight: dims[0]?.pageHeight ?? 0,
+        pageWidth: dims[0]?.pageWidth ?? 0,
       },
     });
   } catch (error) {

@@ -1,8 +1,10 @@
 import { create } from "zustand";
+import { createJSONStorage, persist } from "zustand/middleware";
 import { HeatmapSegment } from "@/api/analytics/endpoints/heatmap";
 
 export type HeatmapView = "clicks" | "attention" | "scroll" | "area";
-export type HeatmapClicksMode = "all" | "rage" | "dead";
+export type HeatmapClicksMode = "all" | "rage" | "dead" | "first" | "last" | "error";
+export type HeatmapAttentionMode = "cursor" | "depth";
 export type HeatmapDevice = "" | "Desktop" | "Mobile" | "Tablet";
 // "diff" is a viewer mode (converters − everyone), not a server segment value.
 export type HeatmapSegmentUI = HeatmapSegment | "diff";
@@ -13,6 +15,7 @@ interface HeatmapState {
   device: HeatmapDevice;
   view: HeatmapView;
   clicksMode: HeatmapClicksMode;
+  attentionMode: HeatmapAttentionMode;
   goalId: number | null;
   segment: HeatmapSegmentUI;
   selectedSnapshotAt: string | null;
@@ -20,25 +23,47 @@ interface HeatmapState {
   setDevice: (device: HeatmapDevice) => void;
   setView: (view: HeatmapView) => void;
   setClicksMode: (mode: HeatmapClicksMode) => void;
+  setAttentionMode: (mode: HeatmapAttentionMode) => void;
   setGoalId: (goalId: number | null) => void;
   setSegment: (segment: HeatmapSegmentUI) => void;
   setSelectedSnapshotAt: (at: string | null) => void;
 }
 
-export const useHeatmapStore = create<HeatmapState>(set => ({
-  hostname: "",
-  pathname: "",
-  device: "Desktop",
-  view: "clicks",
-  clicksMode: "all",
-  goalId: null,
-  segment: "all",
-  selectedSnapshotAt: null,
-  setPage: (hostname, pathname) => set({ hostname, pathname, selectedSnapshotAt: null }),
-  setDevice: device => set({ device }),
-  setView: view => set({ view }),
-  setClicksMode: mode => set({ clicksMode: mode }),
-  setGoalId: goalId => set({ goalId }),
-  setSegment: segment => set({ segment }),
-  setSelectedSnapshotAt: at => set({ selectedSnapshotAt: at }),
-}));
+// Selection persists across refreshes (page, device, view, sub-modes). Snapshot pick,
+// goal, and segment stay session-only. The page selection is validated against the
+// current site's pages in the toolbar, so a stale URL falls back to the top page.
+export const useHeatmapStore = create<HeatmapState>()(
+  persist(
+    set => ({
+      hostname: "",
+      pathname: "",
+      device: "Desktop",
+      view: "clicks",
+      clicksMode: "all",
+      attentionMode: "cursor",
+      goalId: null,
+      segment: "all",
+      selectedSnapshotAt: null,
+      setPage: (hostname, pathname) => set({ hostname, pathname, selectedSnapshotAt: null }),
+      setDevice: device => set({ device }),
+      setView: view => set({ view }),
+      setClicksMode: mode => set({ clicksMode: mode }),
+      setAttentionMode: mode => set({ attentionMode: mode }),
+      setGoalId: goalId => set({ goalId }),
+      setSegment: segment => set({ segment }),
+      setSelectedSnapshotAt: at => set({ selectedSnapshotAt: at }),
+    }),
+    {
+      name: "rybbit-heatmap-ui",
+      storage: createJSONStorage(() => localStorage),
+      partialize: state => ({
+        hostname: state.hostname,
+        pathname: state.pathname,
+        device: state.device,
+        view: state.view,
+        clicksMode: state.clicksMode,
+        attentionMode: state.attentionMode,
+      }),
+    }
+  )
+);

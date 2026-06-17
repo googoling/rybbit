@@ -86,6 +86,8 @@ export interface HeatmapPageItem {
 }
 
 export type HeatmapSegment = "all" | "converters" | "non_converters";
+// Click sub-mode for the clicks/elements endpoints. rage/dead use the insights endpoint.
+export type HeatmapClickMode = "all" | "first" | "last" | "error";
 
 // Page + device + conversion segmentation on top of the shared time/filter params.
 export interface HeatmapParams extends CommonApiParams {
@@ -94,6 +96,7 @@ export interface HeatmapParams extends CommonApiParams {
   device?: string;
   goalId?: number | null;
   segment?: HeatmapSegment;
+  mode?: HeatmapClickMode;
 }
 
 function heatmapQuery(params: HeatmapParams) {
@@ -104,6 +107,7 @@ function heatmapQuery(params: HeatmapParams) {
     device: params.device,
     goalId: params.goalId ?? undefined,
     segment: params.segment,
+    mode: params.mode,
   };
 }
 

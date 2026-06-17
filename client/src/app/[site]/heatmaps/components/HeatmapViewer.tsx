@@ -96,6 +96,27 @@ function drawAreaMap(ctx: CanvasRenderingContext2D, points: HeatmapPoint[], widt
   }
 }
 
+// Depth-based attention: full-width horizontal bands colored by how much attention
+// each scroll-depth band received (Clarity-style dwell-by-depth). Robust at low n.
+function drawAttentionBands(ctx: CanvasRenderingContext2D, points: HeatmapPoint[], width: number, height: number) {
+  ctx.clearRect(0, 0, width, height);
+  if (!points.length) return;
+  const ZONES = 20;
+  const bandH = height / ZONES;
+  const samples = Array.from({ length: ZONES }, (_, i) => {
+    const lo = i * bandH;
+    const hi = (i + 1) * bandH;
+    return points.filter(p => p.y_absolute >= lo && p.y_absolute < hi).reduce((s, p) => s + p.count, 0);
+  });
+  const max = Math.max(...samples, 1);
+  for (let i = 0; i < ZONES; i++) {
+    const ratio = samples[i] / max;
+    const hue = Math.round(240 - 240 * ratio);
+    ctx.fillStyle = `hsla(${hue}, 85%, 50%, ${0.15 + 0.4 * ratio})`;
+    ctx.fillRect(0, i * bandH, width, bandH);
+  }
+}
+
 function toHeatPoints(points: HeatmapPoint[], baseWidth: number): HeatPoint[] {
   return points.map(p => ({ x: (p.x_percent / 100) * baseWidth, y: p.y_absolute, value: p.count }));
 }
@@ -116,7 +137,8 @@ const ATTENTION_ZONES = 20;
 
 export function HeatmapViewer() {
   const t = useExtracted();
-  const { hostname, pathname, device, view, clicksMode, segment, goalId, selectedSnapshotAt } = useHeatmapStore();
+  const { hostname, pathname, device, view, clicksMode, attentionMode, segment, goalId, selectedSnapshotAt } =
+    useHeatmapStore();
   const deviceParam = device || undefined;
 
   const containerRef = useRef<HTMLDivElement>(null);
@@ -127,16 +149,27 @@ export function HeatmapViewer() {
   const [scrollHover, setScrollHover] = useState<{ screenY: number; reachPct: number } | null>(null);
   const [hoveredBadge, setHoveredBadge] = useState<{ idx: number; screenLeft: number; screenTop: number } | null>(null);
   const [backdropHeight, setBackdropHeight] = useState(0);
+  const [hoveredRegion, setHoveredRegion] = useState<number | null>(null);
+  const snapshotDocRef = useRef<Document | null>(null);
+  const [docVersion, setDocVersion] = useState(0);
 
   const isDiff = view === "clicks" && segment === "diff";
   const baseSegment: HeatmapSegment = segment === "diff" ? "all" : segment;
   const hasPath = !!pathname;
   const showInsights = view === "clicks" && (clicksMode === "rage" || clicksMode === "dead");
+  // Mode for the click/element queries. rage/dead go through the insights endpoint, so
+  // they map to "all" here; the Area view always reflects all clicks.
+  const clickMode =
+    view === "area"
+      ? "all"
+      : clicksMode === "first" || clicksMode === "last" || clicksMode === "error"
+        ? clicksMode
+        : "all";
 
   const snapshot = useGetHeatmapSnapshot(hostname, pathname, deviceParam, hasPath, selectedSnapshotAt ?? undefined);
 
   const clicks = useGetClickHeatmap({
-    hostname, pathname, device: deviceParam, goalId, segment: baseSegment,
+    hostname, pathname, device: deviceParam, goalId, segment: baseSegment, mode: clickMode,
     enabled: (view === "clicks" || view === "area") && !showInsights && hasPath,
   });
   const clicksConverters = useGetClickHeatmap({
@@ -144,8 +177,8 @@ export function HeatmapViewer() {
     enabled: isDiff && !!goalId && hasPath,
   });
   const elements = useGetRankedElements({
-    hostname, pathname, device: deviceParam, goalId, segment: baseSegment,
-    enabled: view === "clicks" && !showInsights && hasPath,
+    hostname, pathname, device: deviceParam, goalId, segment: baseSegment, mode: clickMode,
+    enabled: (view === "clicks" || view === "area") && !showInsights && hasPath,
   });
   const attention = useGetAttentionMap({
     hostname, pathname, device: deviceParam, goalId, segment: baseSegment,
@@ -212,8 +245,17 @@ export function HeatmapViewer() {
     });
   }, [isDiff, clicks.data, clicksConverters.data, baseWidth]);
 
-  // Reset measured height whenever the snapshot changes (new page or device).
-  useEffect(() => { setBackdropHeight(0); }, [snapshot.data]);
+  // Reset measured height + cached snapshot DOM whenever the snapshot changes.
+  useEffect(() => {
+    setBackdropHeight(0);
+    snapshotDocRef.current = null;
+    setDocVersion(0);
+  }, [snapshot.data]);
+
+  const handleDocReady = useCallback((doc: Document) => {
+    snapshotDocRef.current = doc;
+    setDocVersion(v => v + 1);
+  }, []);
 
   useEffect(() => {
     const el = containerRef.current;
@@ -228,6 +270,40 @@ export function HeatmapViewer() {
   const scale = containerWidth > 0 ? Math.min(containerWidth / baseWidth, 1) : 1;
   const leftOffset = containerWidth > 0 ? Math.max(0, (containerWidth - baseWidth * scale) / 2) : 0;
 
+  // Clarity-style area: map each ranked element onto its real geometry in the
+  // rendered snapshot DOM, so every clicked region is its own selectable box.
+  // Derived entirely from already-captured data — no extra tracking on the site.
+  const areaRegions = useMemo(() => {
+    void docVersion;
+    const doc = snapshotDocRef.current;
+    if (view !== "area" || !doc || !elements.data?.length) return [];
+    const out: { selector: string; text: string; clicks: number; pct: number; x: number; y: number; w: number; h: number }[] = [];
+    for (const e of elements.data) {
+      if (!e.element_selector) continue;
+      let node: Element | null = null;
+      try {
+        node = doc.querySelector(e.element_selector);
+      } catch {
+        node = null;
+      }
+      if (!node) continue;
+      const rect = (node as HTMLElement).getBoundingClientRect();
+      if (rect.width < 4 || rect.height < 4) continue;
+      out.push({
+        selector: e.element_selector,
+        text: e.element_text,
+        clicks: e.clicks,
+        pct: e.percentage,
+        x: rect.left,
+        y: rect.top,
+        w: rect.width,
+        h: rect.height,
+      });
+    }
+    // Render larger regions first so smaller nested ones stay clickable on top.
+    return out.sort((a, b) => b.w * b.h - a.w * a.h);
+  }, [view, elements.data, docVersion, baseWidth, baseHeight]);
+
   useEffect(() => {
     const canvas = canvasRef.current;
     if (!canvas) return;
@@ -238,13 +314,17 @@ export function HeatmapViewer() {
     if (view === "scroll") {
       drawScrollMap(ctx, scroll.data?.buckets ?? [], scroll.data?.foldPercent ?? 0, baseWidth, baseHeight);
     } else if (view === "area") {
-      drawAreaMap(ctx, clicks.data?.points ?? [], baseWidth, baseHeight);
+      // Region boxes (overlaid as DOM) replace the band canvas when available.
+      if (areaRegions.length) ctx.clearRect(0, 0, baseWidth, baseHeight);
+      else drawAreaMap(ctx, clicks.data?.points ?? [], baseWidth, baseHeight);
     } else if (isDiff) {
       drawDiffHeatmap(ctx, { points: diffPoints, width: baseWidth, height: baseHeight });
+    } else if (view === "attention" && attentionMode === "depth") {
+      drawAttentionBands(ctx, attention.data?.points ?? [], baseWidth, baseHeight);
     } else {
       drawHeatmap(ctx, { points: heatPoints, width: baseWidth, height: baseHeight });
     }
-  }, [view, isDiff, heatPoints, diffPoints, scroll.data, clicks.data, baseWidth, baseHeight]);
+  }, [view, isDiff, attentionMode, attention.data, heatPoints, diffPoints, scroll.data, clicks.data, baseWidth, baseHeight, areaRegions.length]);
 
   const activeQuery = showInsights ? insights : view === "clicks" || view === "area" ? clicks : view === "attention" ? attention : scroll;
   const isLoading = hasPath && (snapshot.isLoading || activeQuery.isLoading || (isDiff && clicksConverters.isLoading));
@@ -255,10 +335,67 @@ export function HeatmapViewer() {
     return (elements.data ?? []).filter(e => e.avg_x != null && e.avg_y != null).slice(0, 10);
   }, [view, showInsights, elements.data]);
 
+  // Fan out badges that land on (nearly) the same screen spot so each stays
+  // individually hoverable instead of being hidden under the one on top.
+  const positionedBadges = useMemo(() => {
+    void docVersion;
+    const doc = snapshotDocRef.current;
+    const base = elementBadges.map((e, idx) => {
+      // Re-anchor to the element's real position in the rendered snapshot so the
+      // pin stays on the element even if the page reflowed since clicks were
+      // recorded. Fall back to the stored centroid when the selector can't resolve.
+      let baseX = ((e.avg_x ?? 0) / 100) * baseWidth;
+      let baseY = e.avg_y ?? 0;
+      if (doc && e.element_selector) {
+        let node: Element | null = null;
+        try {
+          node = doc.querySelector(e.element_selector);
+        } catch {
+          node = null;
+        }
+        if (node) {
+          const rect = (node as HTMLElement).getBoundingClientRect();
+          if (rect.width > 0 && rect.height > 0) {
+            baseX = rect.left + rect.width / 2;
+            baseY = rect.top + rect.height / 2;
+          }
+        }
+      }
+      return { e, idx, left: leftOffset + baseX * scale, top: baseY * scale };
+    });
+    const THRESHOLD = 26;
+    const FAN_RADIUS = 18;
+    const claimed = new Array(base.length).fill(false);
+    for (let i = 0; i < base.length; i++) {
+      if (claimed[i]) continue;
+      const cluster = [i];
+      for (let j = i + 1; j < base.length; j++) {
+        if (claimed[j]) continue;
+        if (Math.hypot(base[i].left - base[j].left, base[i].top - base[j].top) < THRESHOLD) {
+          cluster.push(j);
+          claimed[j] = true;
+        }
+      }
+      claimed[i] = true;
+      if (cluster.length > 1) {
+        const cx = cluster.reduce((s, c) => s + base[c].left, 0) / cluster.length;
+        const cy = cluster.reduce((s, c) => s + base[c].top, 0) / cluster.length;
+        cluster.forEach((c, k) => {
+          const angle = (2 * Math.PI * k) / cluster.length - Math.PI / 2;
+          base[c].left = cx + Math.cos(angle) * FAN_RADIUS;
+          base[c].top = cy + Math.sin(angle) * FAN_RADIUS;
+        });
+      }
+    }
+    return base;
+  }, [elementBadges, baseWidth, scale, leftOffset, docVersion]);
+
   const areaBands = useMemo(() => {
     if (view !== "area" || !clicks.data) return [];
     return computeAreaBands(clicks.data.points, clicks.data.totalClicks, baseHeight);
   }, [view, clicks.data, baseHeight]);
+
+  const maxRegionPct = useMemo(() => Math.max(...areaRegions.map(r => r.pct), 0.01), [areaRegions]);
 
   const attentionBands = useMemo(() => {
     if (!attention.data?.points.length || !baseHeight) return [];
@@ -338,6 +475,7 @@ export function HeatmapViewer() {
                   baseWidth={baseWidth}
                   baseHeight={baseHeight}
                   onHeightChange={h => setBackdropHeight(prev => Math.max(prev, h))}
+                  onDocReady={handleDocReady}
                 />
               ) : (
                 <div
@@ -361,19 +499,77 @@ export function HeatmapViewer() {
               />
             </div>
 
+            {/* Area regions — one selectable box per clicked element, like Clarity */}
+            {view === "area" && areaRegions.map((r, idx) => {
+              const ratio = r.pct / maxRegionPct;
+              const hue = Math.round(210 - 210 * ratio);
+              const isHovered = hoveredRegion === idx;
+              const left = leftOffset + r.x * scale;
+              const top = r.y * scale;
+              const w = r.w * scale;
+              const h = r.h * scale;
+              const showLabel = w > 34 && h > 18;
+              return (
+                <div
+                  key={`${r.selector}-${idx}`}
+                  className="absolute flex items-center justify-center rounded-sm"
+                  style={{
+                    left,
+                    top,
+                    width: w,
+                    height: h,
+                    zIndex: isHovered ? 19 : 12,
+                    background: `hsla(${hue}, 85%, 50%, ${0.22 + 0.32 * ratio + (isHovered ? 0.18 : 0)})`,
+                    border: `1.5px solid hsla(${hue}, 85%, 45%, ${isHovered ? 1 : 0.8})`,
+                    cursor: "default",
+                  }}
+                  onMouseEnter={() => setHoveredRegion(idx)}
+                  onMouseLeave={() => setHoveredRegion(null)}
+                >
+                  {showLabel && (
+                    <span className="rounded bg-black/55 px-1.5 py-0.5 text-[11px] font-bold text-white shadow-sm">
+                      {r.pct}%
+                    </span>
+                  )}
+                </div>
+              );
+            })}
+
+            {/* Area region tooltip */}
+            {view === "area" && hoveredRegion != null && areaRegions[hoveredRegion] && (() => {
+              const r = areaRegions[hoveredRegion];
+              const left = leftOffset + (r.x + r.w / 2) * scale;
+              const top = Math.max(8, r.y * scale - 8);
+              return (
+                <div
+                  className="pointer-events-none absolute z-30 max-w-[260px] rounded-lg border border-neutral-200 dark:border-neutral-700 bg-white dark:bg-neutral-900 px-2.5 py-1.5 shadow-lg"
+                  style={{ left, top, transform: "translate(-50%, -100%)" }}
+                >
+                  {r.text && (
+                    <div className="mb-0.5 truncate text-xs font-medium text-neutral-800 dark:text-neutral-100">{r.text}</div>
+                  )}
+                  <div>
+                    <span className="text-sm font-bold text-neutral-900 dark:text-neutral-100">{r.clicks.toLocaleString()}</span>
+                    <span className="ml-1 text-xs text-neutral-500 dark:text-neutral-400">clicks ({r.pct}%)</span>
+                  </div>
+                </div>
+              );
+            })()}
+
             {/* Click badges rendered at screen-space positions so they stay at a fixed size */}
-            {view === "clicks" && !showInsights && elementBadges.map((e, idx) => {
-              const screenLeft = leftOffset + ((e.avg_x ?? 0) / 100) * baseWidth * scale;
-              const screenTop = (e.avg_y ?? 0) * scale;
+            {view === "clicks" && !showInsights && positionedBadges.map(({ e, idx, left, top }) => {
+              const isHovered = hoveredBadge?.idx === idx;
               return (
                 <div
                   key={e.element_selector}
                   className="absolute"
-                  style={{ left: screenLeft, top: screenTop, zIndex: 10, transform: "translate(-50%, -50%)" }}
+                  style={{ left, top, zIndex: isHovered ? 20 : 10, transform: "translate(-50%, -50%)" }}
                 >
                   <div
-                    className="w-7 h-7 rounded-full bg-blue-500 border-2 border-white dark:border-neutral-900 flex items-center justify-center text-[11px] font-bold text-white cursor-default shadow-md"
-                    onMouseEnter={() => setHoveredBadge({ idx, screenLeft, screenTop })}
+                    className={`w-7 h-7 rounded-full border-2 border-white dark:border-neutral-900 flex items-center justify-center text-[11px] font-bold text-white cursor-default shadow-md transition-transform ${
+                      isHovered ? "bg-blue-600 scale-125" : "bg-blue-500"
+                    }`}
+                    onMouseEnter={() => setHoveredBadge({ idx, screenLeft: left, screenTop: top })}
                     onMouseLeave={() => setHoveredBadge(null)}
                   >
                     {idx + 1}
@@ -523,7 +719,40 @@ export function HeatmapViewer() {
             pageHeight={attention.data?.pageHeight ?? baseHeight}
           />
         )}
-        {view === "area" && areaBands.length > 0 && (
+        {view === "area" && areaRegions.length > 0 && (
+          <div className="rounded-lg border border-neutral-200 dark:border-neutral-800 bg-white dark:bg-neutral-900 overflow-hidden">
+            <div className="px-3 py-2 border-b border-neutral-200 dark:border-neutral-800">
+              <span className="text-xs font-semibold text-neutral-600 dark:text-neutral-300">
+                Areas in order of appearance
+              </span>
+              <span className="ml-1.5 text-xs text-neutral-400">{areaRegions.length}</span>
+            </div>
+            <div className="overflow-y-auto max-h-[480px]">
+              {areaRegions
+                .map((r, i) => ({ r, i }))
+                .sort((a, b) => a.r.y - b.r.y)
+                .map(({ r, i }) => (
+                  <div
+                    key={`${r.selector}-${i}`}
+                    className={`flex items-center gap-2 px-3 py-2 border-b border-neutral-100 dark:border-neutral-800/50 cursor-default ${
+                      hoveredRegion === i ? "bg-neutral-100 dark:bg-neutral-800/60" : "hover:bg-neutral-50 dark:hover:bg-neutral-800/40"
+                    }`}
+                    onMouseEnter={() => setHoveredRegion(i)}
+                    onMouseLeave={() => setHoveredRegion(null)}
+                  >
+                    <span className="flex-1 min-w-0 truncate text-xs text-neutral-700 dark:text-neutral-300">
+                      {r.text || r.selector}
+                    </span>
+                    <span className="shrink-0 text-xs text-neutral-500 dark:text-neutral-400">{r.clicks}</span>
+                    <span className="w-10 shrink-0 text-right text-xs font-medium text-neutral-700 dark:text-neutral-300">
+                      {r.pct}%
+                    </span>
+                  </div>
+                ))}
+            </div>
+          </div>
+        )}
+        {view === "area" && areaRegions.length === 0 && areaBands.length > 0 && (
           <div className="rounded-lg border border-neutral-200 dark:border-neutral-800 bg-white dark:bg-neutral-900 overflow-hidden">
             <div className="px-3 py-2 border-b border-neutral-200 dark:border-neutral-800">
               <span className="text-xs font-semibold text-neutral-600 dark:text-neutral-300">Click Distribution</span>

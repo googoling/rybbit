@@ -21,6 +21,7 @@ export interface GetScrollMapRequest {
   Params: { siteId: string };
   Querystring: FilterParams<{
     pathname: string;
+    hostname?: string;
     device?: string;
     goalId?: string;
     segment?: string;
@@ -29,7 +30,7 @@ export interface GetScrollMapRequest {
 
 // Scroll-depth reach: for each 5% depth band, the share of sessions that scrolled that far.
 export async function getScrollMap(req: FastifyRequest<GetScrollMapRequest>, res: FastifyReply) {
-  const { filters, pathname, device, goalId, segment } = req.query;
+  const { filters, pathname, hostname, device, goalId, segment } = req.query;
   const site = req.params.siteId;
 
   if (!pathname) {
@@ -48,6 +49,7 @@ export async function getScrollMap(req: FastifyRequest<GetScrollMapRequest>, res
   const whereClause = `
     site_id = {siteId:Int32}
     AND pathname = {pathname:String}
+    ${hostname ? "AND hostname = {hostname:String}" : ""}
     ${device ? "AND device_type = {device:String}" : ""}
     ${filterStatement}
     ${goalFilter}
@@ -70,14 +72,14 @@ export async function getScrollMap(req: FastifyRequest<GetScrollMapRequest>, res
   const pageQuery = `
     SELECT
       max(page_height) AS pageHeight,
-      any(page_width) AS pageWidth,
+      any(viewport_width) AS pageWidth,
       round(avg(viewport_height) / nullif(max(page_height), 0) * 100) AS foldPercent
     FROM heatmap_events
     WHERE ${whereClause}
   `;
 
   try {
-    const queryParams = { siteId: Number(site), pathname, ...(device ? { device } : {}) };
+    const queryParams = { siteId: Number(site), pathname, ...(hostname ? { hostname } : {}), ...(device ? { device } : {}) };
     const [histResult, pageResult] = await Promise.all([
       clickhouse.query({ query: histogramQuery, format: "JSONEachRow", query_params: queryParams }),
       clickhouse.query({ query: pageQuery, format: "JSONEachRow", query_params: queryParams }),

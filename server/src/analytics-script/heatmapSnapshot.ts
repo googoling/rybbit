@@ -6,7 +6,7 @@ import { ScriptConfig, SessionReplayEvent } from "./types.js";
 // weight to the base tracking bundle.
 
 const SAMPLE_STORAGE_KEY = "rybbit-heatmap-sampled";
-const LOCAL_TS_PREFIX = "rybbit-hm-snap-ts:"; // last SUCCESSFUL capture time per path (cross-session)
+const LOCAL_TS_PREFIX = "rybbit-hm-snap-ts-v3:"; // last SUCCESSFUL capture time per path (cross-session)
 const SNAPSHOT_TTL_MS = 7 * 24 * 60 * 60 * 1000; // re-snapshot a given path at most weekly
 const CAPTURE_DELAY_MS = 4500; // let the page (incl. lazy/cached CSS like FlyingPress) settle first
 const MAX_PAYLOAD_BYTES = 8_000_000; // skip truly pathological pages rather than ship a huge blob
@@ -157,9 +157,7 @@ export class HeatmapSnapshotManager {
         },
         recordCanvas: false,
         collectFonts: false,
-        // Inline images as data URLs so the backdrop renders without cross-origin fetches
-        // (decorai.io blocks its assets from loading inside the dashboard's iframe).
-        inlineImages: true,
+        inlineImages: false,
         // Privacy: mask inputs by default; honor the site's replay block/ignore/mask classes.
         maskAllInputs: this.config.sessionReplayMaskAllInputs ?? true,
         maskInputOptions: this.config.sessionReplayMaskInputOptions ?? { password: true, email: true },
@@ -185,6 +183,7 @@ export class HeatmapSnapshotManager {
     try {
       body = JSON.stringify({
         pathname: path,
+        hostname: window.location.hostname,
         page_width: Math.round(document.documentElement.scrollWidth),
         page_height: Math.round(document.documentElement.scrollHeight),
         viewport_width: Math.round(window.innerWidth),

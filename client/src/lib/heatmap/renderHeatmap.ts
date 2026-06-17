@@ -30,6 +30,18 @@ const DEFAULT_GRADIENT: Record<number, string> = {
 const DIVERGING_NEG = [37, 99, 235]; // blue-600
 const DIVERGING_POS = [220, 38, 38]; // red-600
 
+// Robust reference value so a single dominant bucket doesn't flatten everything
+// else to near-zero. Uses a high percentile of the positive weights.
+function percentileMax(points: HeatPoint[], p: number): number {
+  const values = points
+    .map(pt => Math.abs(pt.value))
+    .filter(v => v > 0)
+    .sort((a, b) => a - b);
+  if (!values.length) return 1;
+  const idx = Math.min(values.length - 1, Math.floor(p * values.length));
+  return Math.max(values[idx], 1);
+}
+
 function buildGradientLut(stops: Record<number, string>): Uint8ClampedArray {
   const canvas = document.createElement("canvas");
   canvas.width = 1;
@@ -76,7 +88,10 @@ function paintIntensity(
 
   for (const p of points) {
     if (p.value <= 0) continue;
-    ctx.globalAlpha = Math.min(Math.max(p.value / max, minOpacity), 1);
+    // sqrt ramp lifts low-count points off the floor so they aren't invisible
+    // next to a dominant cluster, while the hottest still saturate at 1.
+    const t = Math.sqrt(p.value / max);
+    ctx.globalAlpha = Math.min(Math.max(t, minOpacity), 1);
     ctx.drawImage(brush, p.x - r2, p.y - r2);
   }
 
@@ -95,8 +110,8 @@ export function drawHeatmap(ctx: CanvasRenderingContext2D, opts: DrawOptions): v
 
   const radius = opts.radius ?? Math.max(12, Math.round(width / 70));
   const blur = Math.round(radius * 0.9);
-  const minOpacity = opts.minOpacity ?? 0.05;
-  const max = opts.max ?? Math.max(...points.map(p => p.value), 1);
+  const minOpacity = opts.minOpacity ?? 0.1;
+  const max = opts.max ?? percentileMax(points, 0.95);
 
   const intensity = paintIntensity(width, height, points, radius, blur, max, minOpacity);
   const lut = buildGradientLut(DEFAULT_GRADIENT);
@@ -124,8 +139,8 @@ export function drawDiffHeatmap(ctx: CanvasRenderingContext2D, opts: DrawOptions
 
   const radius = opts.radius ?? Math.max(12, Math.round(width / 70));
   const blur = Math.round(radius * 0.9);
-  const minOpacity = opts.minOpacity ?? 0.05;
-  const maxAbs = opts.max ?? Math.max(...points.map(p => Math.abs(p.value)), 1);
+  const minOpacity = opts.minOpacity ?? 0.1;
+  const maxAbs = opts.max ?? percentileMax(points, 0.95);
 
   const positives = points.filter(p => p.value > 0).map(p => ({ ...p, value: p.value }));
   const negatives = points.filter(p => p.value < 0).map(p => ({ ...p, value: -p.value }));

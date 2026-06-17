@@ -4,7 +4,7 @@ import { clickhouse } from "../../db/clickhouse/clickhouse.js";
 import { getFilterStatement } from "../analytics/utils/getFilterStatement.js";
 import { getTimeStatement, processResults } from "../analytics/utils/utils.js";
 
-export type HeatmapPage = { pathname: string; events: number; sessions: number };
+export type HeatmapPage = { hostname: string; pathname: string; events: number; sessions: number };
 
 export interface GetHeatmapPagesRequest {
   Params: { siteId: string };
@@ -22,14 +22,14 @@ export async function getHeatmapPages(req: FastifyRequest<GetHeatmapPagesRequest
   const filterStatement = getFilterStatement(filters, Number(site), timeStatement);
 
   const query = `
-    SELECT pathname, count() AS events, uniqExact(session_id) AS sessions
+    SELECT hostname, pathname, count() AS events, uniqExact(session_id) AS sessions
     FROM heatmap_events
     WHERE site_id = {siteId:Int32}
       ${device ? "AND device_type = {device:String}" : ""}
       ${filterStatement}
       ${timeStatement}
-    GROUP BY pathname
-    ORDER BY events DESC
+    GROUP BY hostname, pathname
+    ORDER BY sessions DESC
     LIMIT {limit:Int32}
   `;
 

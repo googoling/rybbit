@@ -22,6 +22,8 @@ const INTERACTIVE_ROLES = new Set(["button", "link", "tab", "menuitem", "checkbo
 const MOVE_SAMPLE_MS = 100;
 const MOVE_MIN_DELTA_PX = 4;
 const MAX_MOVE_SAMPLES = 600;
+// Error clicks: a JS error firing shortly after a click is attributed to that click.
+const ERROR_CLICK_WINDOW_MS = 1000;
 
 interface RecentClick {
   x: number;
@@ -88,6 +90,9 @@ export class HeatmapTrackingManager {
   private rageCooldownUntil = 0;
   private lastMutationAt = 0;
   private mutationObserver?: MutationObserver;
+  private deadCheckPending = 0;
+  private lastClickContext: HeatmapMarkerContext | null = null;
+  private lastClickAt = 0;
   private lastMoveX = 0;
   private lastMoveY = 0;
   private lastMoveAt = 0;
@@ -105,6 +110,7 @@ export class HeatmapTrackingManager {
   private boundRefreshPageDims: () => void;
   private boundHandleVisibilityChange: () => void;
   private boundFlush: () => void;
+  private boundHandleError: () => void;
 
   constructor(tracker: Tracker, config: ScriptConfig) {
     this.tracker = tracker;
@@ -116,6 +122,7 @@ export class HeatmapTrackingManager {
     this.boundRefreshPageDims = this.refreshPageDims.bind(this);
     this.boundHandleVisibilityChange = this.handleVisibilityChange.bind(this);
     this.boundFlush = this.flushOnExit.bind(this);
+    this.boundHandleError = this.handleError.bind(this);
   }
 
   initialize(): void {
@@ -138,6 +145,9 @@ export class HeatmapTrackingManager {
     window.addEventListener("scroll", this.boundHandleScroll, { passive: true });
     document.addEventListener("visibilitychange", this.boundHandleVisibilityChange);
     window.addEventListener("pagehide", this.boundFlush);
+    // Error clicks: attribute a JS error to the click that immediately preceded it.
+    window.addEventListener("error", this.boundHandleError);
+    window.addEventListener("unhandledrejection", this.boundHandleError);
 
     // Attention (mouse-movement) capture: cache page dims once, track the cursor
     // cheaply, then sample it on a timer so dwell time is naturally weighted.
@@ -150,21 +160,16 @@ export class HeatmapTrackingManager {
       this.dimsObserver = new ResizeObserver(this.boundRefreshPageDims);
       this.dimsObserver.observe(document.documentElement);
     }
-    this.moveTimer = window.setInterval(() => this.sampleMove(), MOVE_SAMPLE_MS);
-
-    // A lightweight global mutation signal powers dead-click detection: if the DOM
-    // never changes after a click on a non-interactive element, the click was "dead".
-    if (typeof MutationObserver !== "undefined") {
-      this.mutationObserver = new MutationObserver(() => {
-        this.lastMutationAt = Date.now();
-      });
-      this.mutationObserver.observe(document.documentElement, {
-        childList: true,
-        subtree: true,
-        attributes: true,
-        characterData: true,
-      });
+    // Only sample the cursor while the tab is actually visible; visibilitychange
+    // starts/stops the timer so a backgrounded tab does no attention work at all.
+    if (document.visibilityState === "visible") {
+      this.startMoveTimer();
     }
+
+    // Dead-click detection needs a "did the DOM change after this click" signal.
+    // Rather than observe the whole document for the entire session (expensive on
+    // animated pages), the observer is connected lazily only during the short
+    // window after a non-interactive click — see detectDeadClick / releaseDeadObserver.
 
     this.setupBatchTimer();
   }
@@ -221,8 +226,23 @@ export class HeatmapTrackingManager {
 
     this.addEvent({ type: "click", ...context, timestamp: now });
 
+    // Remember the latest click so a JS error firing just after can be attributed to it.
+    this.lastClickContext = context;
+    this.lastClickAt = now;
+
     this.detectRageClick(event, context, now);
     this.detectDeadClick(target, context, now);
+  }
+
+  // A JS error (or unhandled rejection) within a short window of a click marks that
+  // click as an "error click" — the click likely triggered the failure.
+  private handleError(): void {
+    if (!this.active || !this.lastClickContext) return;
+    const now = Date.now();
+    if (now - this.lastClickAt > ERROR_CLICK_WINDOW_MS) return;
+    this.addEvent({ type: "error", ...this.lastClickContext, timestamp: this.lastClickAt });
+    // One error marker per click.
+    this.lastClickContext = null;
   }
 
   // Emit one "rage" marker per burst of rapid clicks landing in the same spot.
@@ -241,16 +261,53 @@ export class HeatmapTrackingManager {
   }
 
   // Emit a "dead" marker if a click on a non-interactive element produced no DOM change.
+  // The mutation observer is connected only for the brief check window, then released,
+  // so there is no always-on observer cost for the rest of the session.
   private detectDeadClick(target: HTMLElement | null, context: HeatmapMarkerContext, clickedAt: number): void {
     if (isInteractive(target)) return;
+    if (typeof MutationObserver === "undefined") return;
+
+    this.connectDeadObserver();
+    this.deadCheckPending++;
 
     window.setTimeout(() => {
-      if (!this.active) return;
-      // Navigation or any DOM mutation after the click means it did something.
-      if (this.lastMutationAt > clickedAt) return;
-      if (document.visibilityState !== "visible") return;
-      this.addEvent({ type: "dead", ...context, timestamp: clickedAt });
+      this.deadCheckPending--;
+      try {
+        if (!this.active) return;
+        // Navigation or any DOM mutation after the click means it did something.
+        if (this.lastMutationAt > clickedAt) return;
+        if (document.visibilityState !== "visible") return;
+        this.addEvent({ type: "dead", ...context, timestamp: clickedAt });
+      } finally {
+        this.releaseDeadObserver();
+      }
     }, DEAD_CHECK_MS);
+  }
+
+  // Lazily attach the mutation observer for the dead-click window. Connects on the
+  // first pending check; overlapping clicks within the window reuse it.
+  private connectDeadObserver(): void {
+    if (!this.mutationObserver) {
+      this.mutationObserver = new MutationObserver(() => {
+        this.lastMutationAt = Date.now();
+      });
+    }
+    if (this.deadCheckPending === 0) {
+      this.mutationObserver.observe(document.documentElement, {
+        childList: true,
+        subtree: true,
+        attributes: true,
+        characterData: true,
+      });
+    }
+  }
+
+  // Disconnect once the last pending dead-click check has resolved.
+  private releaseDeadObserver(): void {
+    if (this.deadCheckPending <= 0) {
+      this.deadCheckPending = 0;
+      this.mutationObserver?.disconnect();
+    }
   }
 
   private handleScroll(): void {
@@ -435,7 +492,22 @@ export class HeatmapTrackingManager {
 
   private handleVisibilityChange(): void {
     if (document.visibilityState === "hidden") {
+      this.stopMoveTimer();
       this.flushOnExit();
+    } else if (this.active) {
+      this.startMoveTimer();
+    }
+  }
+
+  private startMoveTimer(): void {
+    if (this.moveTimer) return;
+    this.moveTimer = window.setInterval(() => this.sampleMove(), MOVE_SAMPLE_MS);
+  }
+
+  private stopMoveTimer(): void {
+    if (this.moveTimer) {
+      clearInterval(this.moveTimer);
+      this.moveTimer = undefined;
     }
   }
 
@@ -464,15 +536,15 @@ export class HeatmapTrackingManager {
     window.removeEventListener("resize", this.boundRefreshPageDims);
     document.removeEventListener("visibilitychange", this.boundHandleVisibilityChange);
     window.removeEventListener("pagehide", this.boundFlush);
+    window.removeEventListener("error", this.boundHandleError);
+    window.removeEventListener("unhandledrejection", this.boundHandleError);
 
     this.mutationObserver?.disconnect();
     this.mutationObserver = undefined;
+    this.deadCheckPending = 0;
     this.recentClicks = [];
 
-    if (this.moveTimer) {
-      clearInterval(this.moveTimer);
-      this.moveTimer = undefined;
-    }
+    this.stopMoveTimer();
 
     this.dimsObserver?.disconnect();
     this.dimsObserver = undefined;
