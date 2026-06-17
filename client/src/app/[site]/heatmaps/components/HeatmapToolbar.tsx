@@ -94,14 +94,8 @@ function SplitButton({
         {icon}
         {label}
         <DropdownMenuTrigger asChild>
-          <span
-            role="button"
-            tabIndex={0}
-            aria-label={ariaLabel}
-            onClick={e => e.stopPropagation()}
-            className="ml-1.5 inline-flex cursor-pointer items-center"
-          >
-            <ChevronDown size={12} className="opacity-70" />
+          <span role="button" tabIndex={0} aria-label={ariaLabel} onClick={e => e.stopPropagation()}>
+            <ChevronDown />
           </span>
         </DropdownMenuTrigger>
       </Button>
