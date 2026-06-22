@@ -10,6 +10,7 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
+import { Slider } from "@/components/ui/slider";
 import { cn } from "@/lib/utils";
 import {
   HeatmapAttentionMode,
@@ -55,7 +56,7 @@ const pill = (active: boolean) =>
   cn(
     "flex items-center gap-1.5 h-8 px-3 text-sm rounded-md transition-colors cursor-pointer",
     active
-      ? "bg-white text-neutral-900 shadow-sm"
+      ? "bg-neutral-750 text-white"
       : "text-neutral-600 dark:text-neutral-400 hover:text-neutral-900 dark:hover:text-neutral-200"
   );
 
@@ -78,21 +79,19 @@ function SplitButton({
   return (
     <DropdownMenu>
       <div className={GROUP}>
-        <div className={cn(pill(active), "gap-1 pr-1.5")}>
-          <button type="button" onClick={onPrimary} className="flex items-center gap-1.5 cursor-pointer">
-            {icon}
-            {label}
+        <button type="button" onClick={onPrimary} className={cn(pill(active), "px-0 pl-2")}>
+          {icon}
+          {label}
+        </button>
+        <DropdownMenuTrigger asChild>
+          <button
+            type="button"
+            aria-label={ariaLabel}
+            className="inline-flex cursor-pointer items-center justify-center gap-2 whitespace-nowrap font-medium transition-colors pl-1 py-2"
+          >
+            <ChevronDown className="h-4 w-4" />
           </button>
-          <DropdownMenuTrigger asChild>
-            <button
-              type="button"
-              aria-label={ariaLabel}
-              className="inline-flex cursor-pointer items-center justify-center gap-2 whitespace-nowrap font-medium transition-colors pl-1 py-2"
-            >
-              <ChevronDown className="h-4 w-4" />
-            </button>
-          </DropdownMenuTrigger>
-        </div>
+        </DropdownMenuTrigger>
       </div>
       {menu}
     </DropdownMenu>
@@ -101,7 +100,7 @@ function SplitButton({
 
 export function HeatmapToolbar() {
   const t = useExtracted();
-  const { device, view, clicksMode, attentionMode, setDevice, setView, setClicksMode, setAttentionMode } =
+  const { device, view, clicksMode, attentionMode, opacity, setDevice, setView, setClicksMode, setAttentionMode, setOpacity } =
     useHeatmapStore();
 
   const clicksLabel = CLICKS_MODES.find(m => m.value === clicksMode)?.label ?? "Clicks";
@@ -173,8 +172,19 @@ export function HeatmapToolbar() {
         />
       </div>
 
-      {/* Right: device switcher + backdrop picker */}
+      {/* Right: opacity + device switcher + backdrop picker */}
       <div className="flex items-center gap-2">
+        <div className="flex items-center gap-2">
+          <span className="text-xs text-neutral-500 dark:text-neutral-400">Opacity</span>
+          <Slider
+            value={[opacity]}
+            min={0.1}
+            max={1}
+            step={0.05}
+            onValueChange={v => setOpacity(v[0])}
+            className="w-24"
+          />
+        </div>
         <TooltipProvider delayDuration={400}>
           <div className={GROUP}>
             {DEVICES.map(d => (

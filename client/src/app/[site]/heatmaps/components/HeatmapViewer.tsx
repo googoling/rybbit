@@ -138,7 +138,7 @@ const ATTENTION_ZONES = 20;
 
 export function HeatmapViewer() {
   const t = useExtracted();
-  const { hostname, pathname, device, view, clicksMode, attentionMode, segment, goalId, selectedSnapshotAt } =
+  const { hostname, pathname, device, view, clicksMode, attentionMode, segment, goalId, selectedSnapshotAt, opacity } =
     useHeatmapStore();
   const deviceParam = device || undefined;
 
@@ -520,7 +520,7 @@ export function HeatmapViewer() {
               )}
               <canvas
                 ref={canvasRef}
-                style={{ position: "absolute", top: 0, left: 0, width: baseWidth, height: baseHeight, pointerEvents: "none" }}
+                style={{ position: "absolute", top: 0, left: 0, width: baseWidth, height: baseHeight, pointerEvents: "none", opacity }}
               />
             </div>
 

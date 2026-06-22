@@ -19,6 +19,7 @@ interface HeatmapState {
   goalId: number | null;
   segment: HeatmapSegmentUI;
   selectedSnapshotAt: string | null;
+  opacity: number;
   setPage: (hostname: string, pathname: string) => void;
   setDevice: (device: HeatmapDevice) => void;
   setView: (view: HeatmapView) => void;
@@ -27,6 +28,7 @@ interface HeatmapState {
   setGoalId: (goalId: number | null) => void;
   setSegment: (segment: HeatmapSegmentUI) => void;
   setSelectedSnapshotAt: (at: string | null) => void;
+  setOpacity: (opacity: number) => void;
 }
 
 // Selection persists across refreshes (page, device, view, sub-modes). Snapshot pick,
@@ -44,6 +46,7 @@ export const useHeatmapStore = create<HeatmapState>()(
       goalId: null,
       segment: "all",
       selectedSnapshotAt: null,
+      opacity: 0.7,
       setPage: (hostname, pathname) => set({ hostname, pathname, selectedSnapshotAt: null }),
       setDevice: device => set({ device }),
       setView: view => set({ view }),
@@ -52,6 +55,7 @@ export const useHeatmapStore = create<HeatmapState>()(
       setGoalId: goalId => set({ goalId }),
       setSegment: segment => set({ segment }),
       setSelectedSnapshotAt: at => set({ selectedSnapshotAt: at }),
+      setOpacity: opacity => set({ opacity }),
     }),
     {
       name: "rybbit-heatmap-ui",
@@ -63,6 +67,7 @@ export const useHeatmapStore = create<HeatmapState>()(
         view: state.view,
         clicksMode: state.clicksMode,
         attentionMode: state.attentionMode,
+        opacity: state.opacity,
       }),
     }
   )
