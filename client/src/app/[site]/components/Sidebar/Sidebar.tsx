@@ -28,7 +28,7 @@ import { Suspense } from "react";
 import { useGetSite } from "../../../../api/admin/hooks/useSites";
 import { Sidebar as SidebarComponents } from "../../../../components/sidebar/Sidebar";
 import { SiteSettings } from "../../../../components/SiteSettings/SiteSettings";
-import { DEMO_HOSTNAME, IS_CLOUD } from "../../../../lib/const";
+import { DEMO_HOSTNAME } from "../../../../lib/const";
 import { featureEnabled } from "../../../../lib/featureOverrides";
 import { getSiteRouteContext } from "../../../../lib/siteRoute";
 import { useEmbedPageOptions } from "../../utils";
@@ -128,7 +128,7 @@ function SidebarContent() {
             icon={<Code className="w-4 h-4" />}
           />
         </div>
-        {!IS_CLOUD && (
+        {false && (
           <>
             <SidebarComponents.Item
               label={t("Query")}
