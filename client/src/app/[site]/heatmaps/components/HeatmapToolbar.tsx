@@ -78,16 +78,19 @@ function SplitButton({
 }) {
   return (
     <DropdownMenu>
-      <div className={GROUP}>
+      <div className={cn(GROUP, active && "dark:bg-neutral-750")}>
         <button type="button" onClick={onPrimary} className={cn(pill(active), "px-0 pl-2")}>
           {icon}
           {label}
         </button>
-        <DropdownMenuTrigger asChild>
+        <DropdownMenuTrigger asChild unstyled>
           <button
             type="button"
             aria-label={ariaLabel}
-            className="inline-flex cursor-pointer items-center justify-center gap-2 whitespace-nowrap font-medium transition-colors pl-1 py-2"
+            className={cn(
+              "inline-flex cursor-pointer items-center justify-center px-2 py-2",
+              active ? "text-white" : "text-neutral-600 dark:text-neutral-400 hover:text-neutral-900 dark:hover:text-neutral-200"
+            )}
           >
             <ChevronDown className="h-4 w-4" />
           </button>
