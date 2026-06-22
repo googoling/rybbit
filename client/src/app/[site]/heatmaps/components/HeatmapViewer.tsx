@@ -1,6 +1,7 @@
 "use client";
 
 import { useExtracted } from "next-intl";
+import { MousePointerClick } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { HeatmapPoint, HeatmapSegment, ScrollMapBucket } from "@/api/analytics/endpoints/heatmap";
 import {
@@ -215,9 +216,6 @@ export function HeatmapViewer() {
     ? Math.max(snapshot.data!.pageHeight, dataMaxY, backdropHeight)
     : Math.max(clicks.data?.pageHeight || 0, attention.data?.pageHeight || 0, scroll.data?.pageHeight || 0, dataMaxY, 600);
 
-  const snapshotDeviceMismatch =
-    hasSnapshot && !!deviceParam && !!snapshot.data?.capturedDevice && snapshot.data.capturedDevice !== deviceParam;
-
   const activeInsightPoints = clicksMode === "rage" ? insights.data?.rage.points ?? [] : insights.data?.dead.points ?? [];
 
   const heatPoints = useMemo(() => {
@@ -307,27 +305,54 @@ export function HeatmapViewer() {
   useEffect(() => {
     const canvas = canvasRef.current;
     if (!canvas) return;
-    canvas.width = baseWidth;
-    canvas.height = baseHeight;
+    // Cap the heatmap BITMAP resolution. The canvas is CSS-stretched to the full
+    // backdrop size, and the heatmap is a blurry overlay (brush radius is width-relative),
+    // so a lower-res bitmap is visually identical. Without this, a tall page
+    // (e.g. 2005×11783 ≈ 24MP) does a ~94MB per-pixel pass each redraw and freezes the tab.
+    const RENDER_MAX_PX = 4_000_000;
+    const rScale = Math.min(1, Math.sqrt(RENDER_MAX_PX / Math.max(1, baseWidth * baseHeight)));
+    const rW = Math.max(1, Math.round(baseWidth * rScale));
+    const rH = Math.max(1, Math.round(baseHeight * rScale));
+    canvas.width = rW;
+    canvas.height = rH;
     const ctx = canvas.getContext("2d");
     if (!ctx) return;
+    const scaleHeat = (pts: HeatPoint[]) =>
+      rScale === 1 ? pts : pts.map(p => ({ x: p.x * rScale, y: p.y * rScale, value: p.value }));
+    const scaleAbs = (pts: HeatmapPoint[]) =>
+      rScale === 1 ? pts : pts.map(p => ({ ...p, y_absolute: p.y_absolute * rScale }));
     if (view === "scroll") {
-      drawScrollMap(ctx, scroll.data?.buckets ?? [], scroll.data?.foldPercent ?? 0, baseWidth, baseHeight);
+      drawScrollMap(ctx, scroll.data?.buckets ?? [], scroll.data?.foldPercent ?? 0, rW, rH);
     } else if (view === "area") {
       // Region boxes (overlaid as DOM) replace the band canvas when available.
-      if (areaRegions.length) ctx.clearRect(0, 0, baseWidth, baseHeight);
-      else drawAreaMap(ctx, clicks.data?.points ?? [], baseWidth, baseHeight);
+      if (areaRegions.length) ctx.clearRect(0, 0, rW, rH);
+      else drawAreaMap(ctx, scaleAbs(clicks.data?.points ?? []), rW, rH);
     } else if (isDiff) {
-      drawDiffHeatmap(ctx, { points: diffPoints, width: baseWidth, height: baseHeight });
+      drawDiffHeatmap(ctx, { points: scaleHeat(diffPoints), width: rW, height: rH });
     } else if (view === "attention" && attentionMode === "depth") {
-      drawAttentionBands(ctx, attention.data?.points ?? [], baseWidth, baseHeight);
+      drawAttentionBands(ctx, scaleAbs(attention.data?.points ?? []), rW, rH);
     } else {
-      drawHeatmap(ctx, { points: heatPoints, width: baseWidth, height: baseHeight });
+      drawHeatmap(ctx, { points: scaleHeat(heatPoints), width: rW, height: rH });
     }
   }, [view, isDiff, attentionMode, attention.data, heatPoints, diffPoints, scroll.data, clicks.data, baseWidth, baseHeight, areaRegions.length]);
 
   const activeQuery = showInsights ? insights : view === "clicks" || view === "area" ? clicks : view === "attention" ? attention : scroll;
   const isLoading = hasPath && (snapshot.isLoading || activeQuery.isLoading || (isDiff && clicksConverters.isLoading));
+
+  const pointCount = showInsights
+    ? (clicksMode === "rage" ? insights.data?.rage.points?.length : insights.data?.dead.points?.length) ?? 0
+    : view === "clicks" || view === "area"
+      ? clicks.data?.points?.length ?? 0
+      : view === "attention"
+        ? attention.data?.points?.length ?? 0
+        : scroll.data?.buckets?.length ?? 0;
+  const showNoData = hasPath && hasSnapshot && !isLoading && pointCount === 0;
+  const noDataTitle =
+    view === "scroll"
+      ? t("No scroll data for this page")
+      : view === "attention"
+        ? t("No attention data for this page")
+        : t("No click data for this page");
 
   // Badges: filtered elements with position data, rendered at screen-space coords outside the scaled div
   const elementBadges = useMemo(() => {
@@ -499,6 +524,18 @@ export function HeatmapViewer() {
               />
             </div>
 
+            {showNoData && (
+              <div className="absolute inset-0 z-40 flex items-start justify-center pt-24 bg-neutral-950/30">
+                <div className="flex flex-col items-center gap-1.5 rounded-lg border border-neutral-200 dark:border-neutral-700 bg-white/95 dark:bg-neutral-900/95 px-6 py-5 text-center shadow-lg">
+                  <MousePointerClick className="h-6 w-6 text-neutral-400 dark:text-neutral-500" />
+                  <div className="text-sm font-medium text-neutral-900 dark:text-neutral-100">{noDataTitle}</div>
+                  <div className="text-xs text-neutral-500 dark:text-neutral-400">
+                    {t("Data will appear once users interact with this page")}
+                  </div>
+                </div>
+              </div>
+            )}
+
             {/* Area regions — one selectable box per clicked element, like Clarity */}
             {view === "area" && areaRegions.map((r, idx) => {
               const ratio = r.pct / maxRegionPct;
@@ -616,13 +653,6 @@ export function HeatmapViewer() {
                 </span>
               </div>
             </>
-          )}
-
-          {snapshotDeviceMismatch && (
-            <div className="absolute top-2 left-2 z-20 flex items-center gap-1.5 rounded bg-amber-500/90 px-2 py-1 text-xs font-medium text-white shadow">
-              <span>⚠</span>
-              <span>Showing {snapshot.data!.capturedDevice} snapshot — no {deviceParam} backdrop captured yet</span>
-            </div>
           )}
 
           {/* Attention hover tooltip */}

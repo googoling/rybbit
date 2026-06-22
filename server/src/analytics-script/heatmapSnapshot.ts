@@ -12,6 +12,7 @@ const CAPTURE_DELAY_MS = 4500; // let the page (incl. lazy/cached CSS like Flyin
 const MAX_PAYLOAD_BYTES = 8_000_000; // skip truly pathological pages rather than ship a huge blob
 const STOP_TIMEOUT_MS = 8000; // never leave the recorder running
 const RRWEB_FULL_SNAPSHOT = 2;
+const MIN_SNAPSHOT_WIDTH = 1600; // only store backdrops from wide viewports; heatmap events are still tracked at all sizes
 
 export class HeatmapSnapshotManager {
   private config: ScriptConfig;
@@ -92,6 +93,13 @@ export class HeatmapSnapshotManager {
 
   private async capture(): Promise<void> {
     if (!this.active) return;
+    // Only store backdrops from wide viewports so the heatmap renders on a large,
+    // representative page render. Narrow windows/mobile still track events; they just
+    // don't contribute a (low-res) backdrop.
+    if (window.innerWidth < MIN_SNAPSHOT_WIDTH) {
+      this.diag("viewport-too-narrow:" + window.innerWidth);
+      return;
+    }
     const path = this.getPathname();
     if (this.alreadyCaptured(path)) return;
     this.attempted.add(path); // prevent duplicate attempts within this page-load only

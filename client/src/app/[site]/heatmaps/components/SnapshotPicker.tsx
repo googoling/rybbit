@@ -42,10 +42,13 @@ export function SnapshotPicker() {
   return (
     <Dialog>
       <DialogTrigger asChild>
-        <Button variant="outline" size="sm" className="gap-1.5">
+        <button
+          type="button"
+          className="flex items-center gap-1.5 h-8 rounded-lg bg-neutral-100 dark:bg-neutral-800 px-3 text-sm text-neutral-700 dark:text-neutral-300 transition-colors cursor-pointer hover:bg-neutral-200 dark:hover:bg-neutral-700 hover:text-neutral-900 dark:hover:text-neutral-100"
+        >
           <Camera size={13} />
           Change backdrop
-        </Button>
+        </button>
       </DialogTrigger>
       <DialogContent className="max-w-lg">
         <DialogHeader>
