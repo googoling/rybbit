@@ -55,7 +55,7 @@ const pill = (active: boolean) =>
   cn(
     "flex items-center gap-1.5 h-8 px-3 text-sm rounded-md transition-colors cursor-pointer",
     active
-      ? "bg-white dark:bg-neutral-700 text-neutral-900 dark:text-neutral-100 shadow-sm"
+      ? "bg-white text-neutral-900 shadow-sm"
       : "text-neutral-600 dark:text-neutral-400 hover:text-neutral-900 dark:hover:text-neutral-200"
   );
 
@@ -87,7 +87,7 @@ function SplitButton({
             <button
               type="button"
               aria-label={ariaLabel}
-              className="flex items-center cursor-pointer opacity-60 transition-opacity hover:opacity-100"
+              className="inline-flex cursor-pointer items-center justify-center gap-2 whitespace-nowrap font-medium transition-colors pl-1 py-2"
             >
               <ChevronDown className="h-4 w-4" />
             </button>
@@ -136,7 +136,7 @@ export function HeatmapToolbar() {
         {/* Click | Area sub-toggle */}
         <div className={GROUP}>
           {CLICK_TABS.map(tab => (
-            <button key={tab.value} type="button" onClick={() => setView(tab.value)} className={pill(view === tab.value)}>
+            <button key={tab.value} type="button" onClick={() => setView(tab.value)} className={pill(tab.value === "area" && view === "area")}>
               {tab.label}
             </button>
           ))}
