@@ -1488,6 +1488,7 @@
   var MOVE_SAMPLE_MS = 100;
   var MOVE_MIN_DELTA_PX = 4;
   var MAX_MOVE_SAMPLES = 600;
+  var ERROR_CLICK_WINDOW_MS = 1e3;
   function isInteractive(element) {
     let current = element;
     let depth = 0;
@@ -1530,6 +1531,9 @@
       this.recentClicks = [];
       this.rageCooldownUntil = 0;
       this.lastMutationAt = 0;
+      this.deadCheckPending = 0;
+      this.lastClickContext = null;
+      this.lastClickAt = 0;
       this.lastMoveX = 0;
       this.lastMoveY = 0;
       this.lastMoveAt = 0;
@@ -1547,6 +1551,7 @@
       this.boundRefreshPageDims = this.refreshPageDims.bind(this);
       this.boundHandleVisibilityChange = this.handleVisibilityChange.bind(this);
       this.boundFlush = this.flushOnExit.bind(this);
+      this.boundHandleError = this.handleError.bind(this);
     }
     initialize() {
       if (!this.config.enableHeatmaps) {
@@ -1564,6 +1569,8 @@
       window.addEventListener("scroll", this.boundHandleScroll, { passive: true });
       document.addEventListener("visibilitychange", this.boundHandleVisibilityChange);
       window.addEventListener("pagehide", this.boundFlush);
+      window.addEventListener("error", this.boundHandleError);
+      window.addEventListener("unhandledrejection", this.boundHandleError);
       this.refreshPageDims();
       window.addEventListener("mousemove", this.boundHandleMouseMove, { passive: true });
       window.addEventListener("resize", this.boundRefreshPageDims, { passive: true });
@@ -1571,17 +1578,8 @@
         this.dimsObserver = new ResizeObserver(this.boundRefreshPageDims);
         this.dimsObserver.observe(document.documentElement);
       }
-      this.moveTimer = window.setInterval(() => this.sampleMove(), MOVE_SAMPLE_MS);
-      if (typeof MutationObserver !== "undefined") {
-        this.mutationObserver = new MutationObserver(() => {
-          this.lastMutationAt = Date.now();
-        });
-        this.mutationObserver.observe(document.documentElement, {
-          childList: true,
-          subtree: true,
-          attributes: true,
-          characterData: true
-        });
+      if (document.visibilityState === "visible") {
+        this.startMoveTimer();
       }
       this.setupBatchTimer();
     }
@@ -1628,8 +1626,19 @@
         element_text: target ? this.getElementText(target) : ""
       };
       this.addEvent({ type: "click", ...context, timestamp: now });
+      this.lastClickContext = context;
+      this.lastClickAt = now;
       this.detectRageClick(event, context, now);
       this.detectDeadClick(target, context, now);
+    }
+    // A JS error (or unhandled rejection) within a short window of a click marks that
+    // click as an "error click" — the click likely triggered the failure.
+    handleError() {
+      if (!this.active || !this.lastClickContext) return;
+      const now = Date.now();
+      if (now - this.lastClickAt > ERROR_CLICK_WINDOW_MS) return;
+      this.addEvent({ type: "error", ...this.lastClickContext, timestamp: this.lastClickAt });
+      this.lastClickContext = null;
     }
     // Emit one "rage" marker per burst of rapid clicks landing in the same spot.
     detectRageClick(event, context, now) {
@@ -1644,14 +1653,48 @@
       }
     }
     // Emit a "dead" marker if a click on a non-interactive element produced no DOM change.
+    // The mutation observer is connected only for the brief check window, then released,
+    // so there is no always-on observer cost for the rest of the session.
     detectDeadClick(target, context, clickedAt) {
       if (isInteractive(target)) return;
+      if (typeof MutationObserver === "undefined") return;
+      this.connectDeadObserver();
+      this.deadCheckPending++;
       window.setTimeout(() => {
-        if (!this.active) return;
-        if (this.lastMutationAt > clickedAt) return;
-        if (document.visibilityState !== "visible") return;
-        this.addEvent({ type: "dead", ...context, timestamp: clickedAt });
+        this.deadCheckPending--;
+        try {
+          if (!this.active) return;
+          if (this.lastMutationAt > clickedAt) return;
+          if (document.visibilityState !== "visible") return;
+          this.addEvent({ type: "dead", ...context, timestamp: clickedAt });
+        } finally {
+          this.releaseDeadObserver();
+        }
       }, DEAD_CHECK_MS);
+    }
+    // Lazily attach the mutation observer for the dead-click window. Connects on the
+    // first pending check; overlapping clicks within the window reuse it.
+    connectDeadObserver() {
+      if (!this.mutationObserver) {
+        this.mutationObserver = new MutationObserver(() => {
+          this.lastMutationAt = Date.now();
+        });
+      }
+      if (this.deadCheckPending === 0) {
+        this.mutationObserver.observe(document.documentElement, {
+          childList: true,
+          subtree: true,
+          attributes: true,
+          characterData: true
+        });
+      }
+    }
+    // Disconnect once the last pending dead-click check has resolved.
+    releaseDeadObserver() {
+      if (this.deadCheckPending <= 0) {
+        this.deadCheckPending = 0;
+        this.mutationObserver?.disconnect();
+      }
     }
     handleScroll() {
       if (!this.active) return;
@@ -1804,7 +1847,20 @@
     }
     handleVisibilityChange() {
       if (document.visibilityState === "hidden") {
+        this.stopMoveTimer();
         this.flushOnExit();
+      } else if (this.active) {
+        this.startMoveTimer();
+      }
+    }
+    startMoveTimer() {
+      if (this.moveTimer) return;
+      this.moveTimer = window.setInterval(() => this.sampleMove(), MOVE_SAMPLE_MS);
+    }
+    stopMoveTimer() {
+      if (this.moveTimer) {
+        clearInterval(this.moveTimer);
+        this.moveTimer = void 0;
       }
     }
     sendBatch(batch, keepalive) {
@@ -1830,13 +1886,13 @@
       window.removeEventListener("resize", this.boundRefreshPageDims);
       document.removeEventListener("visibilitychange", this.boundHandleVisibilityChange);
       window.removeEventListener("pagehide", this.boundFlush);
+      window.removeEventListener("error", this.boundHandleError);
+      window.removeEventListener("unhandledrejection", this.boundHandleError);
       this.mutationObserver?.disconnect();
       this.mutationObserver = void 0;
+      this.deadCheckPending = 0;
       this.recentClicks = [];
-      if (this.moveTimer) {
-        clearInterval(this.moveTimer);
-        this.moveTimer = void 0;
-      }
+      this.stopMoveTimer();
       this.dimsObserver?.disconnect();
       this.dimsObserver = void 0;
       this.clearBatchTimer();
