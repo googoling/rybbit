@@ -138,7 +138,7 @@ export function HeatmapToolbar() {
         {/* Click | Area sub-toggle */}
         <div className={GROUP}>
           {CLICK_TABS.map(tab => (
-            <button key={tab.value} type="button" onClick={() => setView(tab.value)} className={pill(tab.value === "area" && view === "area")}>
+            <button key={tab.value} type="button" onClick={() => setView(tab.value)} className={pill(view === tab.value)}>
               {tab.label}
             </button>
           ))}
