@@ -3,7 +3,7 @@ import { clickhouse } from "../../../db/clickhouse/clickhouse.js";
 import { db } from "../../../db/postgres/postgres.js";
 import { goals } from "../../../db/postgres/schema.js";
 import { eq } from "drizzle-orm";
-import { getTimeStatement, processResults, patternToRegex } from "../utils/utils.js";
+import { getTimeStatement, processResults, patternToRegex, enrichWithTraits } from "../utils/utils.js";
 import { FilterParams } from "@rybbit/shared";
 import { GetSessionsResponse } from "../sessions/getSessions.js";
 import SqlString from "sqlstring";
@@ -112,6 +112,7 @@ export async function getGoalSessions(req: FastifyRequest<GetGoalSessionsRequest
       SELECT
         e.session_id,
         e.user_id,
+        argMax(e.identified_user_id, e.timestamp) AS identified_user_id,
         argMax(e.country, e.timestamp) AS country,
         argMax(e.region, e.timestamp) AS region,
         argMax(e.city, e.timestamp) AS city,
@@ -171,8 +172,9 @@ export async function getGoalSessions(req: FastifyRequest<GetGoalSessionsRequest
       },
     });
 
-    const data = await processResults<GetSessionsResponse[number]>(result);
-    return res.send({ data });
+    const data = await processResults<Omit<GetSessionsResponse[number], "traits">>(result);
+    const enriched = await enrichWithTraits(data, Number(siteId));
+    return res.send({ data: enriched });
   } catch (error) {
     console.error("Error fetching goal sessions:", error);
     return res.status(500).send({ error: "Failed to fetch goal sessions" });
