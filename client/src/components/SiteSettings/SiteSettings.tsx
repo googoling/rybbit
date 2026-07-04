@@ -6,6 +6,7 @@ import {
   Download,
   LayoutDashboard,
   LayoutTemplate,
+  Mail,
   Plug,
   Settings,
   SlidersHorizontal,
@@ -28,6 +29,7 @@ import { ExclusionsTab } from "./ExclusionsTab";
 import { IntegrationsTab } from "./IntegrationsTab";
 import { EmbedTab } from "./EmbedTab";
 import { DashboardEmbedTab } from "./DashboardEmbedTab";
+import { MailboTab } from "@/custom/mailbo/MailboTab"; // CUSTOM
 import { useGetSite } from "../../api/admin/hooks/useSites";
 import { useUserOrganizations } from "../../api/admin/hooks/useOrganizations";
 import { useGetSitesFromOrg } from "../../api/admin/hooks/useSites";
@@ -52,7 +54,8 @@ type TabKey =
   | "script"
   | "import"
   | "widget-embeds"
-  | "dashboard-embed";
+  | "dashboard-embed"
+  | "mailbo"; // CUSTOM
 
 function SiteSettingsInner({ siteMetadata, trigger }: { siteMetadata: SiteResponse; trigger?: React.ReactNode }) {
   const t = useExtracted();
@@ -105,6 +108,7 @@ function SiteSettingsInner({ siteMetadata, trigger }: { siteMetadata: SiteRespon
     { key: "script", label: isMobileSite ? t("React Native SDK") : t("Tracking Script"), icon: Code },
     { key: "widget-embeds", label: t("Widget Embeds"), icon: LayoutTemplate },
     { key: "dashboard-embed", label: t("Dashboard Embed"), icon: LayoutDashboard },
+    { key: "mailbo", label: "Mailbo", icon: Mail }, // CUSTOM
     { key: "import", label: t("Import"), icon: Download },
   ];
 
@@ -194,6 +198,7 @@ function SiteSettingsInner({ siteMetadata, trigger }: { siteMetadata: SiteRespon
                   disabled={disabled}
                 />
               )}
+              {activeTab === "mailbo" && <MailboTab siteId={siteMetadata.siteId} disabled={disabled} />}{/* CUSTOM */}
               {activeTab === "import" && <ImportManager siteId={siteMetadata.siteId} disabled={disabled} />}
             </div>
           </main>

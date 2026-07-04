@@ -34,6 +34,16 @@ Shared upstream files heatmap edits IN PLACE (the real conflict surface):
 
 Deploy default image tag is `heatmap`; health check verifies `heatmap_events` / `heatmap_snapshots` tables exist.
 
+### Mailbo integration (our feature — `server/src/custom/mailbo/`, `client/src/custom/mailbo/`)
+Rybbit → Mailbo intent sync. Self-contained module (conflict-proof). Spec in
+`server/src/custom/mailbo/SPEC.md`. Custom tables via `schema.sql` (applied manually — no auto-migration).
+Shared upstream files it hooks into (protect on merge):
+| File | Hook |
+|---|---|
+| `server/src/index.ts` | registers `mailboRoutes` (`// CUSTOM`) |
+| `server/src/services/tracker/trackEvent.ts` | calls `onMailboEvent(...)` after ingest (`// CUSTOM`) |
+| `client/src/components/SiteSettings/SiteSettings.tsx` | adds the "Mailbo" settings tab (`// CUSTOM`) |
+
 ## In-place edits to upstream files
 
 | File | What we changed | Commit / note |

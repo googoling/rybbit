@@ -11,6 +11,7 @@ import { checkApiKey } from "../../lib/auth-utils.js";
 import { botEventQueue } from "./botBlocking/botEventQueue.js";
 import { checkBotBlocking } from "./botBlocking/index.js";
 import { resolveTrackingIdentity } from "./requestIdentity.js";
+import { onMailboEvent } from "../../custom/mailbo/index.js"; // CUSTOM
 
 // Shared fields for all event types
 const baseEventFields = {
@@ -377,6 +378,14 @@ export async function trackEvent(request: FastifyRequest, reply: FastifyReply) {
     await pageviewQueue.add({
       ...payload,
       sessionId,
+    });
+
+    onMailboEvent({ // CUSTOM: fire-and-forget rybbit → Mailbo intent sync
+      siteId: siteConfiguration.siteId,
+      identifiedUserId: payload.identifiedUserId,
+      type: validatedPayload.type,
+      eventName: payload.event_name,
+      pathname: payload.pathname,
     });
 
     return reply.status(200).send({

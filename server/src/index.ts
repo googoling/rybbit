@@ -180,6 +180,7 @@ import { trackEvent } from "./services/tracker/trackEvent.js";
 import { usageService } from "./services/usageService.js";
 import { weeklyReportService } from "./services/weekyReports/weeklyReportService.js";
 import { handleAppSumoWebhook, activateAppSumoLicense } from "./api/as/index.js";
+import { mailboRoutes } from "./custom/mailbo/index.js"; // CUSTOM
 
 // Pre-composed middleware chains for common auth patterns
 // Cast as any to work around Fastify's type inference limitations with preHandler
@@ -476,6 +477,7 @@ async function apiRoutes(fastify: FastifyInstance) {
   await fastify.register(userRoutes);
   await fastify.register(gscRoutes);
   await fastify.register(stripeAdminRoutes);
+  await fastify.register(mailboRoutes); // CUSTOM
 
   // Health check
   fastify.get("/health", { logLevel: "silent" }, (_: FastifyRequest, reply: FastifyReply) => reply.send("OK"));
