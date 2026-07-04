@@ -2,6 +2,13 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
+## ⚠️ This is a customized FORK of open-source Rybbit — read first
+
+- **`FORK_MAINTENANCE.md`** (repo root) — MANDATORY before any upstream update or new-feature work. Covers the safe upstream-merge workflow, the "never run `update.sh`" rule, and the module convention.
+- **`CUSTOMIZATIONS.md`** (repo root) — the divergence map: every upstream file we edited in place. Keep it current.
+- **New features are always modules**: add them under `server/src/custom/<feature>/` or `client/src/custom/<feature>/` and wire in with a single `// CUSTOM`-tagged line. Prefer new files over editing upstream files.
+- **Deploy with `./deploy.sh`** (builds our source into images on ssh host `faridul`). Never `update.sh`.
+
 ## Commands
 
 - Client: `cd client && npm run dev` (NextJS with Turbopack on port 3002)
