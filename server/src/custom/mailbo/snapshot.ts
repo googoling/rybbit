@@ -28,6 +28,7 @@ interface Row {
   m_checkout_completed: number;
   plan_considered: string;
   plan_price: string;
+  pack_considered: string;
   first_tool: string;
   tool_paths: string[];
   event_tools: string[];
@@ -64,6 +65,9 @@ export async function computeSnapshot(
       argMaxIf(JSONExtractString(toString(props), 'price'), timestamp,
         type = 'custom_event' AND event_name = 'checkout_started'
         AND JSONExtractString(toString(props), 'plan_name') != '') AS plan_price,
+      argMaxIf(JSONExtractString(toString(props), 'pack_name'), timestamp,
+        type = 'custom_event' AND event_name = 'checkout_started'
+        AND JSONExtractString(toString(props), 'pack_name') != '') AS pack_considered,
       argMaxIf(JSONExtractString(toString(props), 'tool'), timestamp,
         type = 'custom_event' AND event_name IN ('design_generated','first_design_generated','generate_attempted')
         AND JSONExtractString(toString(props), 'tool') != '') AS first_tool,
@@ -126,15 +130,16 @@ export async function computeSnapshot(
 
   const attrs: Record<string, unknown> = {
     // country intentionally NOT sent — the DecorAI backend owns it (disjoint writer).
+    analytics_profile: `https://analytics.faridul.com/${siteId}/user/${encodeURIComponent(identifiedUserId)}`,
     intent_primary_interest: primaryInterest || undefined,
     intent_tools_explored: toolsExplored || undefined,
     intent_pricing_views: Number(r.pricing_views) || 0,
     intent_furthest_step: furthest ? FURTHEST_STEP_LABELS[furthest] : undefined,
-    intent_plan_considered: r.plan_considered
-      ? `${r.plan_considered}${r.plan_price ? ` ($${r.plan_price})` : ""}`
-      : undefined,
+    intent_plan_considered:
+      (r.plan_considered
+        ? `${r.plan_considered}${r.plan_price ? ` ($${r.plan_price})` : ""}`
+        : r.pack_considered) || undefined,
     intent_status: status,
-    intent_last_active: r.last_active.slice(0, 10),
   };
   for (const k of Object.keys(attrs)) if (attrs[k] === undefined) delete attrs[k];
 
