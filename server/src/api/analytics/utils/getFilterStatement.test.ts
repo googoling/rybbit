@@ -142,10 +142,10 @@ describe("getFilterStatement", () => {
       expect(result).toBe("AND browser != 'Chrome'");
     });
 
-    it("should handle multiple not_equals values", () => {
+    it("should handle multiple not_equals values with NOT IN semantics", () => {
       const filters = JSON.stringify([{ parameter: "browser", type: "not_equals", value: ["Chrome", "Firefox"] }]);
       const result = getFilterStatement(filters);
-      expect(result).toBe("AND (browser != 'Chrome' OR browser != 'Firefox')");
+      expect(result).toBe("AND (browser != 'Chrome' AND browser != 'Firefox')");
     });
   });
 
@@ -284,16 +284,15 @@ describe("getFilterStatement", () => {
   });
 
   describe("Channel session acquisition filter", () => {
-    it("should filter by the first non-empty channel in each session", () => {
+    it("should filter by the first attributed channel in each session", () => {
       const filters = JSON.stringify([{ parameter: "channel", type: "equals", value: ["Organic Search"] }]);
       const result = getFilterStatement(filters, 123, "AND timestamp > now() - INTERVAL 1 DAY");
 
       expect(result).toContain("session_id IN");
-      expect(result).toContain("argMin(channel, timestamp) AS session_channel");
+      expect(result).toContain("argMinIf(channel, timestamp, channel NOT IN ('Direct', 'Internal', ''))");
+      expect(result).toContain("AS session_channel");
       expect(result).toContain("site_id = 123");
       expect(result).toContain("timestamp > now() - INTERVAL 1 DAY");
-      expect(result).toContain("channel IS NOT NULL");
-      expect(result).toContain("channel <> ''");
       expect(result).toContain("session_channel = 'Organic Search'");
     });
 

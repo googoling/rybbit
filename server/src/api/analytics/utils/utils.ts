@@ -33,7 +33,9 @@ export function getTimeStatement(
       ? { start: Number(past_minutes_start), end: Number(past_minutes_end) }
       : undefined;
 
-  const date = start_date && end_date && time_zone ? { start_date, end_date, time_zone } : undefined;
+  // A missing time_zone must not silently discard the requested date range
+  // (that would return all-time data); dates are interpreted as UTC instead.
+  const date = start_date && end_date ? { start_date, end_date, time_zone: time_zone || "UTC" } : undefined;
   const dateTimeRange = start_datetime && end_datetime ? { start_datetime, end_datetime } : undefined;
 
   // Sanitize inputs with Zod

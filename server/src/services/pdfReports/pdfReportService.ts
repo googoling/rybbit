@@ -42,10 +42,13 @@ class PdfReportService {
       throw new Error(`Site not found: ${siteId}`);
     }
 
-    // Calculate previous period (same duration before startDate)
+    // Calculate previous period (same duration before startDate). The current
+    // window is inclusive of both boundary dates (getTimeStatement makes the end
+    // exclusive at end_date + 1 day), so an N-day range spans floor(diff)+1 days.
+    // The previous window must match that length, else every growth % is biased.
     const start = DateTime.fromISO(startDate, { zone: timeZone });
     const end = DateTime.fromISO(endDate, { zone: timeZone });
-    const durationDays = Math.ceil(end.diff(start, "days").days) || 1;
+    const durationDays = Math.floor(end.diff(start, "days").days) + 1;
 
     const previousEnd = start.minus({ days: 1 });
     const previousStart = previousEnd.minus({ days: durationDays - 1 });

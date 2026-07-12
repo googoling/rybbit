@@ -110,7 +110,7 @@ const getQuery = (params: FilterParams<{ bucket: TimeBucket }>, siteId: number) 
 
   const isAllTime = !start_date && !end_date && !start_datetime && !end_datetime && !pastMinutesRange;
   const fillClause = isAllTime ? "" : getTimeStatementFill(params, bucket);
-  const tzEscaped = SqlString.escape(time_zone);
+  const tzEscaped = SqlString.escape(time_zone || "UTC");
 
   return `
 WITH

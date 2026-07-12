@@ -5,6 +5,7 @@ import { db } from "../../../db/postgres/postgres.js";
 import { enrichWithTraits, getTimeStatement, processResults } from "../utils/utils.js";
 import { FilterParams } from "@rybbit/shared";
 import { getFilterStatement } from "../utils/getFilterStatement.js";
+import { SESSION_CHANNEL_AGG, SESSION_REFERRER_AGG } from "../utils/sessionAttribution.js";
 
 export type GetUsersResponse = {
   user_id: string; // Device fingerprint
@@ -98,6 +99,10 @@ export async function getUsers(req: FastifyRequest<GetUsersRequest>, res: Fastif
 
   // Generate filter statement and time statement
   const timeStatement = getTimeStatement(req.query);
+  // Applied inside the CTE against raw events (same placement as the count
+  // queries): the aggregate doesn't project every filterable column
+  // (pathname, querystring, utm_*, …), and event-level placement keeps the
+  // returned rows consistent with totalCount.
   const filterStatement = getFilterStatement(filters, Number(site), timeStatement);
 
   const query = `
@@ -118,8 +123,8 @@ WITH AggregatedUsers AS (
         argMax(device_type, timestamp) AS device_type,
         argMax(screen_width, timestamp) AS screen_width,
         argMax(screen_height, timestamp) AS screen_height,
-        argMin(referrer, timestamp) AS referrer,
-        argMin(channel, timestamp) AS channel,
+        ${SESSION_REFERRER_AGG} AS referrer,
+        ${SESSION_CHANNEL_AGG} AS channel,
         argMin(hostname, timestamp) AS hostname,
         countIf(type = 'pageview') AS pageviews,
         countIf(type = 'custom_event') AS events,
@@ -131,6 +136,7 @@ WITH AggregatedUsers AS (
     WHERE
         site_id = {siteId:Int32}
         ${timeStatement}
+        ${filterStatement}
         ${matchingUserIds ? "AND events.identified_user_id IN ({matchingUserIds:Array(String)})" : ""}
     GROUP BY
         effective_user_id
@@ -138,7 +144,7 @@ WITH AggregatedUsers AS (
 SELECT
     *
 FROM AggregatedUsers
-WHERE 1 = 1 ${filterStatement}
+WHERE 1 = 1
 ${filterIdentified ? "AND identified_user_id != ''" : ""}
 ORDER BY ${actualSortBy} ${actualSortOrder}
 LIMIT {limit:Int32} OFFSET {offset:Int32}

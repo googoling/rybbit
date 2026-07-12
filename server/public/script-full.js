@@ -545,23 +545,27 @@
         const canvas = document.createElement("canvas");
         const gl = canvas.getContext("webgl") || canvas.getContext("experimental-webgl");
         if (gl) {
-          const rendererParts = [];
-          const rendererRaw = gl.getParameter(gl.RENDERER);
-          if (typeof rendererRaw === "string") {
-            rendererParts.push(rendererRaw);
-          }
           try {
-            const debugInfo = gl.getExtension("WEBGL_debug_renderer_info");
-            if (debugInfo) {
-              const unmaskedRaw = gl.getParameter(debugInfo.UNMASKED_RENDERER_WEBGL);
-              if (typeof unmaskedRaw === "string") {
-                rendererParts.push(unmaskedRaw);
-              }
+            const rendererParts = [];
+            const rendererRaw = gl.getParameter(gl.RENDERER);
+            if (typeof rendererRaw === "string") {
+              rendererParts.push(rendererRaw);
             }
-          } catch {
-          }
-          if (rendererParts.join(" ").toLowerCase().includes("swiftshader")) {
-            addSignal(CLIENT_BOT_SIGNAL_MASKS.swiftShader, 1);
+            try {
+              const debugInfo = gl.getExtension("WEBGL_debug_renderer_info");
+              if (debugInfo) {
+                const unmaskedRaw = gl.getParameter(debugInfo.UNMASKED_RENDERER_WEBGL);
+                if (typeof unmaskedRaw === "string") {
+                  rendererParts.push(unmaskedRaw);
+                }
+              }
+            } catch {
+            }
+            if (rendererParts.join(" ").toLowerCase().includes("swiftshader")) {
+              addSignal(CLIENT_BOT_SIGNAL_MASKS.swiftShader, 1);
+            }
+          } finally {
+            releaseWebGlContext(canvas, gl);
           }
         }
       } catch {
@@ -579,6 +583,15 @@
       score: Math.min(score, MAX_BOT_SCORE),
       mask
     };
+  }
+  function releaseWebGlContext(canvas, gl) {
+    try {
+      const loseContextExt = gl.getExtension("WEBGL_lose_context");
+      loseContextExt?.loseContext?.();
+    } catch {
+    }
+    canvas.width = 0;
+    canvas.height = 0;
   }
 
   // tracking.ts

@@ -5,17 +5,19 @@ import { enrichTweet, type TweetProps } from "react-tweet";
 import { getTweet, type Tweet } from "react-tweet/api";
 import { TweetBody, TweetHeader, TweetMedia } from "./TweetClient";
 
-type TweetEntityBuckets = Partial<Record<keyof Tweet["entities"], unknown>>;
+type TweetEntities = NonNullable<Tweet["entities"]>;
 
-const getEntityBucket = <Key extends keyof Tweet["entities"]>(
+type TweetEntityBuckets = Partial<Record<keyof TweetEntities, unknown>>;
+
+const getEntityBucket = <Key extends keyof TweetEntities>(
   entities: TweetEntityBuckets | null | undefined,
   key: Key
-): NonNullable<Tweet["entities"][Key]> => {
+): NonNullable<TweetEntities[Key]> => {
   const bucket = entities?.[key];
-  return (Array.isArray(bucket) ? bucket : []) as NonNullable<Tweet["entities"][Key]>;
+  return (Array.isArray(bucket) ? bucket : []) as NonNullable<TweetEntities[Key]>;
 };
 
-const normalizeTweetEntities = (entities: TweetEntityBuckets | null | undefined): Tweet["entities"] => {
+const normalizeTweetEntities = (entities: TweetEntityBuckets | null | undefined): TweetEntities => {
   const media = getEntityBucket(entities, "media");
 
   return {

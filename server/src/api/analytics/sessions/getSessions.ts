@@ -2,6 +2,7 @@ import { FilterParams } from "@rybbit/shared";
 import { FastifyReply, FastifyRequest } from "fastify";
 import { clickhouse } from "../../../db/clickhouse/clickhouse.js";
 import { getFilterStatement } from "../utils/getFilterStatement.js";
+import { SESSION_CHANNEL_AGG, SESSION_REFERRER_AGG } from "../utils/sessionAttribution.js";
 import { enrichWithTraits, getTimeStatement, processResults } from "../utils/utils.js";
 
 export type GetSessionsResponse = {
@@ -96,10 +97,12 @@ export async function getSessions(req: FastifyRequest<GetSessionsRequest>, res: 
   const timeStatement = getTimeStatement(req.query);
 
   // Use composable filter options:
-  // - sessionLevelParams: pathname and page_title filter at session level (finds sessions that visited a page)
+  // - sessionLevelParams: per-event fields filter at session level (finds sessions
+  //   containing a matching event) — required for any parameter the aggregated CTE
+  //   below doesn't project, otherwise the outer WHERE hits an unknown identifier
   // - fieldMappings: CTE extracts UTM params as separate columns, so we need to map the field names
   const filterStatement = getFilterStatement(filters, Number(site), timeStatement, {
-    sessionLevelParams: ["event_name", "pathname", "page_title", "channel"],
+    sessionLevelParams: ["event_name", "pathname", "page_title", "querystring", "channel"],
     fieldMappings: SESSION_FIELD_MAPPINGS,
   });
 
@@ -120,8 +123,8 @@ export async function getSessions(req: FastifyRequest<GetSessionsRequest>, res: 
           argMax(operating_system_version, timestamp) AS operating_system_version,
           argMax(screen_width, timestamp) AS screen_width,
           argMax(screen_height, timestamp) AS screen_height,
-          argMin(referrer, timestamp) AS referrer,
-          argMin(channel, timestamp) AS channel,
+          ${SESSION_REFERRER_AGG} AS referrer,
+          ${SESSION_CHANNEL_AGG} AS channel,
           argMin(hostname, timestamp) AS hostname,
           argMin(url_parameters, timestamp)['utm_source'] AS utm_source,
           argMin(url_parameters, timestamp)['utm_medium'] AS utm_medium,
@@ -144,7 +147,8 @@ export async function getSessions(req: FastifyRequest<GetSessionsRequest>, res: 
           argMax(ip, timestamp) AS ip,
           argMax(lat, timestamp) AS lat,
           argMax(lon, timestamp) AS lon,
-          argMax(tag, timestamp) AS tag
+          argMax(tag, timestamp) AS tag,
+          argMax(timezone, timestamp) AS timezone
       FROM events
       WHERE
           site_id = {siteId:Int32}

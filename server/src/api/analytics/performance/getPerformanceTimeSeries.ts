@@ -101,7 +101,7 @@ const getQuery = (params: FilterParams<{ bucket: TimeBucket }>, siteId: number) 
 
   const query = `
 SELECT
-    toDateTime(${TimeBucketToFn[bucket]}(toTimeZone(timestamp, ${SqlString.escape(time_zone)}))) AS time,
+    toDateTime(${TimeBucketToFn[bucket]}(toTimeZone(timestamp, ${SqlString.escape(time_zone || "UTC")}))) AS time,
     quantile(0.5)(lcp) AS lcp_p50,
     quantile(0.75)(lcp) AS lcp_p75,
     quantile(0.9)(lcp) AS lcp_p90,

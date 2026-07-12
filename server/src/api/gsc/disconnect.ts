@@ -2,7 +2,7 @@ import { FastifyReply, FastifyRequest } from "fastify";
 import { DisconnectGSCRequest } from "./types.js";
 import { gscConnections } from "../../db/postgres/schema.js";
 import { eq } from "drizzle-orm";
-import { getUserHasAccessToSite } from "../../lib/auth-utils.js";
+import { getUserHasAdminAccessToSite } from "../../lib/auth-utils.js";
 import { db } from "../../db/postgres/postgres.js";
 import { logger } from "../../lib/logger/logger.js";
 
@@ -19,8 +19,9 @@ export async function disconnectGSC(req: FastifyRequest<DisconnectGSCRequest>, r
       return res.status(400).send({ error: "Invalid site ID" });
     }
 
-    // Check if user has access to this site
-    const hasAccess = await getUserHasAccessToSite(req, numericSiteId);
+    // Managing (removing) a GSC connection is an admin action, consistent with
+    // connect/select-property.
+    const hasAccess = await getUserHasAdminAccessToSite(req, numericSiteId);
     if (!hasAccess) {
       return res.status(403).send({ error: "Access denied" });
     }

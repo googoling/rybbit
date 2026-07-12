@@ -58,8 +58,8 @@ function computeLimits(
     return { memberLimit: BASIC_MEMBER_LIMIT, siteLimit: BASIC_SITE_LIMIT };
   }
 
-  // AppSumo tiers (e.g. "appsumo-1" through "appsumo-6")
-  const appsumoMatch = planName.match(/^appsumo-([123456])$/);
+  // AppSumo tiers (e.g. "appsumo-1" through "appsumo-7")
+  const appsumoMatch = planName.match(/^appsumo-([1-7])$/);
   if (appsumoMatch) {
     const tier = appsumoMatch[1];
     return {

@@ -124,7 +124,10 @@ import {
   getEmbedStats,
   getSite,
   getSiteExcludedCountries,
+  getSiteExcludedHostnames,
   getSiteExcludedIPs,
+  getSiteExcludedPaths,
+  getSiteExcludedUserAgents,
   getSiteHasData,
   getSiteImports,
   getSiteIsPublic,
@@ -134,7 +137,6 @@ import {
   moveSite,
   updateSiteConfig,
   updateSitePrivateLinkConfig,
-  verifyScript,
 } from "./api/sites/index.js";
 import {
   createCheckoutSession,
@@ -157,6 +159,7 @@ import {
   unsubscribeMarketing,
   updateAccountSettings,
 } from "./api/user/index.js";
+import { validateHttpTimeParams } from "./api/analytics/utils/query-validation.js";
 import { initializeClickhouse } from "./db/clickhouse/clickhouse.js";
 import { initPostgres } from "./db/postgres/initPostgres.js";
 import {
@@ -182,10 +185,20 @@ import { weeklyReportService } from "./services/weekyReports/weeklyReportService
 import { handleAppSumoWebhook, activateAppSumoLicense } from "./api/as/index.js";
 import { mailboRoutes } from "./custom/mailbo/index.js"; // CUSTOM
 
+// Reject requests whose shared time query params are present but invalid.
+// Historically they were silently dropped, so endpoints ran over all time and
+// returned wrong data with a 200. Absent params (all-time mode) stay valid.
+const validateTimeParams = async (request: FastifyRequest, reply: FastifyReply) => {
+  const error = validateHttpTimeParams(request.query);
+  if (error) {
+    return reply.status(400).send({ error });
+  }
+};
+
 // Pre-composed middleware chains for common auth patterns
 // Cast as any to work around Fastify's type inference limitations with preHandler
-const publicSite = { preHandler: [resolveSiteId, allowPublicSiteAccess] as any };
-const authSite = { preHandler: [resolveSiteId, requireSiteAccess] as any };
+const publicSite = { preHandler: [resolveSiteId, allowPublicSiteAccess, validateTimeParams] as any };
+const authSite = { preHandler: [resolveSiteId, requireSiteAccess, validateTimeParams] as any };
 const adminSite = { preHandler: [resolveSiteId, requireSiteAdminAccess] as any };
 const authOnly = { preHandler: [requireAuth] as any };
 const adminOnly = { preHandler: [requireAdmin] as any };
@@ -284,22 +297,22 @@ async function analyticsRoutes(fastify: FastifyInstance) {
   // This endpoint gets called a lot so we don't want to log it
   fastify.get("/sites/:siteId/live-user-count", { logLevel: "silent", ...publicSite }, getLiveUsercount);
   fastify.get("/sites/:siteId/overview", publicSite, getOverview);
-  fastify.get("/sites/:siteId/overview-bucketed", publicSite, getOverviewBucketed);
+  fastify.get("/sites/:siteId/overview/time-series", publicSite, getOverviewBucketed);
   fastify.get("/sites/:siteId/overview-lite", publicSite, getOverviewLite);
   fastify.get("/sites/:siteId/overview-bucketed-lite", publicSite, getOverviewBucketedLite);
   fastify.get("/sites/:siteId/metric-lite", publicSite, getMetricLite);
   fastify.get("/sites/:siteId/metric", publicSite, getMetric);
   fastify.get("/sites/:siteId/page-titles", publicSite, getPageTitles);
-  fastify.get("/sites/:siteId/error-names", publicSite, getErrorNames);
-  fastify.get("/sites/:siteId/error-events", publicSite, getErrorEvents);
-  fastify.get("/sites/:siteId/error-bucketed", publicSite, getErrorBucketed);
+  fastify.get("/sites/:siteId/errors/names", publicSite, getErrorNames);
+  fastify.get("/sites/:siteId/errors/events", publicSite, getErrorEvents);
+  fastify.get("/sites/:siteId/errors/time-series", publicSite, getErrorBucketed);
   fastify.get("/sites/:siteId/retention", publicSite, getRetention);
   fastify.get("/sites/:siteId/has-data", publicSite, getSiteHasData);
   fastify.get("/sites/:siteId/is-public", publicSite, getSiteIsPublic);
   fastify.get("/sites/:siteId/sessions", publicSite, getSessions);
   fastify.get("/sites/:siteId/sessions/:sessionId", publicSite, getSession);
   fastify.get("/sites/:siteId/events", publicSite, getEvents);
-  fastify.get("/sites/:siteId/events/bucketed", publicSite, getEventBucketed);
+  fastify.get("/sites/:siteId/events/time-series", publicSite, getEventBucketed);
   fastify.get("/sites/:siteId/events/count", publicSite, getSiteEventCount);
   fastify.get("/sites/:siteId/users", publicSite, getUsers);
 
@@ -308,7 +321,7 @@ async function analyticsRoutes(fastify: FastifyInstance) {
   fastify.get("/sites/:siteId/user-traits/keys", publicSite, getUserTraitKeys);
   fastify.get("/sites/:siteId/user-traits/values", publicSite, getUserTraitValues);
   fastify.get("/sites/:siteId/user-traits/users", publicSite, getUserTraitValueUsers);
-  fastify.get("/sites/:siteId/session-locations", publicSite, getSessionLocations);
+  fastify.get("/sites/:siteId/sessions/locations", publicSite, getSessionLocations);
   fastify.get("/sites/:siteId/funnels", publicSite, getFunnels);
   fastify.get("/sites/:siteId/journeys", publicSite, getJourneys);
   fastify.post("/sites/:siteId/funnels/analyze", publicSite, getFunnel);
@@ -316,7 +329,7 @@ async function analyticsRoutes(fastify: FastifyInstance) {
   fastify.post("/sites/:siteId/funnels", authSite, createFunnel);
   fastify.delete("/sites/:siteId/funnels/:funnelId", authSite, deleteFunnel);
   fastify.get("/sites/:siteId/goals", publicSite, getGoals);
-  fastify.get("/sites/:siteId/goals/bucketed", publicSite, getGoalTimeSeries);
+  fastify.get("/sites/:siteId/goals/time-series", publicSite, getGoalTimeSeries);
   fastify.get("/sites/:siteId/goals/:goalId/sessions", publicSite, getGoalSessions);
   fastify.post("/sites/:siteId/goals", authSite, createGoal);
   fastify.delete("/sites/:siteId/goals/:goalId", authSite, deleteGoal);
@@ -358,7 +371,7 @@ async function analyticsRoutes(fastify: FastifyInstance) {
   fastify.get("/sites/:siteId/bots/overview", publicSite, getBotOverview);
   fastify.get("/sites/:siteId/bots/time-series", publicSite, getBotTimeSeries);
   fastify.get("/sites/:siteId/bots/by-dimension", publicSite, getBotDimension);
-  fastify.get("/sites/:siteId/export/pdf", publicSite, generatePdfReport);
+  fastify.get("/sites/:siteId/export/pdf", authSite, generatePdfReport);
 }
 
 async function sessionReplayRoutes(fastify: FastifyInstance) {
@@ -383,7 +396,9 @@ async function sitesRoutes(fastify: FastifyInstance) {
   fastify.get("/sites/:siteId/embed-stats", { preHandler: [resolveSiteId] as any }, getEmbedStats); // Public - widget endpoint (handler checks site is public)
   fastify.get("/sites/:siteId/excluded-ips", authSite, getSiteExcludedIPs);
   fastify.get("/sites/:siteId/excluded-countries", authSite, getSiteExcludedCountries);
-  fastify.get("/sites/:siteId/verify-script", authSite, verifyScript);
+  fastify.get("/sites/:siteId/excluded-paths", authSite, getSiteExcludedPaths);
+  fastify.get("/sites/:siteId/excluded-hostnames", authSite, getSiteExcludedHostnames);
+  fastify.get("/sites/:siteId/excluded-user-agents", authSite, getSiteExcludedUserAgents);
 
   // Site Imports
   fastify.get("/sites/:siteId/imports", adminSite, getSiteImports);
@@ -431,11 +446,11 @@ async function userRoutes(fastify: FastifyInstance) {
 
 async function gscRoutes(fastify: FastifyInstance) {
   // GOOGLE SEARCH CONSOLE
-  fastify.get("/sites/:siteId/gsc/connect", authSite, connectGSC);
+  fastify.get("/sites/:siteId/gsc/connect", adminSite, connectGSC);
   fastify.get("/gsc/callback", gscCallback); // Public - OAuth callback
   fastify.get("/sites/:siteId/gsc/status", publicSite, getGSCStatus);
-  fastify.delete("/sites/:siteId/gsc/disconnect", authSite, disconnectGSC);
-  fastify.post("/sites/:siteId/gsc/select-property", authSite, selectGSCProperty);
+  fastify.delete("/sites/:siteId/gsc/disconnect", adminSite, disconnectGSC);
+  fastify.post("/sites/:siteId/gsc/select-property", adminSite, selectGSCProperty);
   fastify.get("/sites/:siteId/gsc/data", publicSite, getGSCData);
 }
 

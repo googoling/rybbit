@@ -128,7 +128,7 @@ function SidebarContent() {
             icon={<Code className="w-4 h-4" />}
           />
         </div>
-        {false && (
+        {/* {!IS_CLOUD && (
           <>
             <SidebarComponents.Item
               label={t("Query")}
@@ -143,7 +143,7 @@ function SidebarContent() {
               icon={<LayoutGrid className="w-4 h-4" />}
             />
           </>
-        )}
+        )} */}
         <SidebarComponents.SectionHeader>{t("Product Analytics")}</SidebarComponents.SectionHeader>
         <div className="hidden md:block">
           {!isMobileSite && !subscription?.planName?.startsWith("appsumo") && !isSubscriptionLoading && (
