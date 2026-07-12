@@ -55,6 +55,7 @@ Shared upstream files it hooks into (protect on merge):
 
 | File | What we changed | Commit / note |
 |---|---|---|
+| `client/src/lib/featureOverrides.ts` (our file) + `client/src/app/[site]/components/Sidebar/Sidebar.tsx` + `client/src/app/[site]/main/page.tsx` | Unlock features upstream gates behind `IS_CLOUD` (Pages, Performance, Bots, Search Console) on self-host. The two upstream files swap `{IS_CLOUD && …}` for `{featureEnabled.x && …}`. **On merge: upstream may add new `IS_CLOUD` gates — re-check.** | — |
 | `server/src/api/analytics/goals/getGoalSessions.ts` | Enrich converted sessions with user traits (select `identified_user_id`, call `enrichWithTraits`) so names/emails resolve on the Goals card. | `f98b8394` |
 | `server/src/api/analytics/goals/getGoalSessions.ts` | Prior: default `page` param to 1. | upstream PR #940 (already merged) |
 | `client/src/lib/heatmap/renderHeatmap.ts` | Heatmap rendering tweaks (overlay opacity, click rendering). | Heatmaps rebuild work |
