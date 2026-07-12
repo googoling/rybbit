@@ -36,6 +36,32 @@ behind rybbit-io/rybbit:master"* with a **Sync fork** button. Both are misleadin
 GitHub provides no way to disable this button, so the rule is simply: **don't press it.** To update,
 use the release-tag merge workflow in Rule 1 below.
 
+### If you click it by mistake — it IS recoverable, don't panic
+
+Clicking Sync fork **does not touch production** (`deploy.sh` builds from your *local* source, not
+from GitHub) and **does not change your local clone** until you `git pull`. It only adds a merge
+commit to `origin/my-main` on GitHub.
+
+We keep a `deployed/*` tag marking each known-good, shipped state (tags are never moved by Sync
+fork). Latest: **`deployed/v2.7.0`** = `e51f1f75`.
+
+```bash
+git fetch origin --tags
+git log --oneline -3 deployed/v2.7.0        # confirm this is the state you want
+
+# Option A (local clone still clean — the usual case): just overwrite GitHub.
+git push --force-with-lease origin my-main
+
+# Option B (you already pulled the bad merge): reset local, then push.
+git checkout my-main
+git reset --hard deployed/v2.7.0            # or: git reset --hard ORIG_HEAD
+git push --force-with-lease origin my-main
+```
+
+`git reflog` also records every state your local branch has been in, so even without the tag the
+pre-merge commit is recoverable. **After shipping any future release, move the anchor forward:**
+`git tag -a deployed/vX.Y.Z -m "known-good, deployed" && git push origin deployed/vX.Y.Z`.
+
 ---
 
 ## Rule 1 — How to pull an official upstream update (safe workflow)
