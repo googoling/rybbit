@@ -1,5 +1,5 @@
 {
-  "id": "d51986d2-4d0a-4517-83a4-4e02769fe26f",
+  "id": "d7780f73-1071-4c51-a9dc-32eceb0d9c08",
   "prevId": "5a2ec6d6-04e4-4b23-82f6-093ffb644cd4",
   "version": "7",
   "dialect": "postgresql",
@@ -1955,6 +1955,27 @@
           "notNull": false,
           "default": "'[]'::jsonb"
         },
+        "excluded_paths": {
+          "name": "excluded_paths",
+          "type": "jsonb",
+          "primaryKey": false,
+          "notNull": false,
+          "default": "'[]'::jsonb"
+        },
+        "excluded_hostnames": {
+          "name": "excluded_hostnames",
+          "type": "jsonb",
+          "primaryKey": false,
+          "notNull": false,
+          "default": "'[]'::jsonb"
+        },
+        "excluded_user_agents": {
+          "name": "excluded_user_agents",
+          "type": "jsonb",
+          "primaryKey": false,
+          "notNull": false,
+          "default": "'[]'::jsonb"
+        },
         "sessionReplay": {
           "name": "sessionReplay",
           "type": "boolean",
@@ -2031,20 +2052,6 @@
           "primaryKey": false,
           "notNull": false,
           "default": false
-        },
-        "enableHeatmaps": {
-          "name": "enableHeatmaps",
-          "type": "boolean",
-          "primaryKey": false,
-          "notNull": false,
-          "default": false
-        },
-        "heatmapSampleRate": {
-          "name": "heatmapSampleRate",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": false,
-          "default": 100
         },
         "api_key": {
           "name": "api_key",

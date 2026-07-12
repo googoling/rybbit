@@ -159,7 +159,7 @@ ORDER BY day`,
     category: "Traffic",
     vizType: "area",
     mapping: { xColumn: "time", yColumns: ["pageviews"] },
-    sql: `SELECT toStartOfInterval(timestamp, INTERVAL {{bucket}}) AS time,
+    sql: `SELECT toDateTime(toStartOfInterval(toTimeZone(timestamp, {{tz}}), INTERVAL {{bucket}})) AS time,
        countIf(type = 'pageview') AS pageviews
 FROM scoped_events
 GROUP BY time
@@ -172,7 +172,7 @@ ORDER BY time`,
     category: "Traffic",
     vizType: "line",
     mapping: { xColumn: "time", yColumns: ["sessions", "users"] },
-    sql: `SELECT toStartOfInterval(timestamp, INTERVAL {{bucket}}) AS time,
+    sql: `SELECT toDateTime(toStartOfInterval(toTimeZone(timestamp, {{tz}}), INTERVAL {{bucket}})) AS time,
        countDistinct(session_id) AS sessions,
        countDistinct(user_id) AS users
 FROM scoped_events
@@ -186,7 +186,7 @@ ORDER BY time`,
     category: "Traffic",
     vizType: "line",
     mapping: { xColumn: "time", yColumns: ["bounce_rate"] },
-    sql: `SELECT toStartOfInterval(session_start, INTERVAL {{bucket}}) AS time,
+    sql: `SELECT toDateTime(toStartOfInterval(toTimeZone(session_start, {{tz}}), INTERVAL {{bucket}})) AS time,
        round(100 * countIf(pages = 1) / count(), 1) AS bounce_rate
 FROM (
   SELECT session_id,
@@ -460,7 +460,7 @@ LIMIT 20`,
     beyondPrebuilt: true,
     vizType: "line",
     mapping: { xColumn: "time", yColumns: ["avg_seconds"] },
-    sql: `SELECT toStartOfInterval(session_start, INTERVAL {{bucket}}) AS time,
+    sql: `SELECT toDateTime(toStartOfInterval(toTimeZone(session_start, {{tz}}), INTERVAL {{bucket}})) AS time,
        round(avg(duration_seconds)) AS avg_seconds
 FROM (
   SELECT session_id,
@@ -508,9 +508,9 @@ WHERE has_pricing = 1`,
   WHERE user_id != ''
   GROUP BY user_id
 )
-SELECT toStartOfInterval(e.timestamp, INTERVAL {{bucket}}) AS time,
+SELECT toDateTime(toStartOfInterval(toTimeZone(e.timestamp, {{tz}}), INTERVAL {{bucket}})) AS time,
        if(
-         toStartOfInterval(e.timestamp, INTERVAL {{bucket}}) = toStartOfInterval(f.first_seen_at, INTERVAL {{bucket}}),
+         toStartOfInterval(toTimeZone(e.timestamp, {{tz}}), INTERVAL {{bucket}}) = toStartOfInterval(toTimeZone(f.first_seen_at, {{tz}}), INTERVAL {{bucket}}),
          'New in range',
          'Returning in range'
        ) AS visitor_type,
@@ -629,7 +629,7 @@ LIMIT 50`,
     beyondPrebuilt: true,
     vizType: "line",
     mapping: { xColumn: "time", yColumns: ["conversion_rate_pct"] },
-    sql: `SELECT toStartOfInterval(session_start, INTERVAL {{bucket}}) AS time,
+    sql: `SELECT toDateTime(toStartOfInterval(toTimeZone(session_start, {{tz}}), INTERVAL {{bucket}})) AS time,
        round(100 * countIf(converted = 1) / nullIf(count(), 0), 1) AS conversion_rate_pct
 FROM (
   SELECT session_id,
@@ -700,7 +700,7 @@ LIMIT 50`,
     category: "Events",
     vizType: "line",
     mapping: { xColumn: "time", yColumns: ["events"], seriesColumn: "event_name" },
-    sql: `SELECT toStartOfInterval(timestamp, INTERVAL {{bucket}}) AS time,
+    sql: `SELECT toDateTime(toStartOfInterval(toTimeZone(timestamp, {{tz}}), INTERVAL {{bucket}})) AS time,
        event_name,
        count() AS events
 FROM scoped_events
@@ -809,7 +809,7 @@ LIMIT 50`,
     category: "Events",
     vizType: "line",
     mapping: { xColumn: "time", yColumns: ["errors"] },
-    sql: `SELECT toStartOfInterval(timestamp, INTERVAL {{bucket}}) AS time,
+    sql: `SELECT toDateTime(toStartOfInterval(toTimeZone(timestamp, {{tz}}), INTERVAL {{bucket}})) AS time,
        count() AS errors
 FROM scoped_events
 WHERE type = 'error'
@@ -840,7 +840,7 @@ LIMIT 50`,
     beyondPrebuilt: true,
     vizType: "line",
     mapping: { xColumn: "time", yColumns: ["errors_per_1k_pageviews"] },
-    sql: `SELECT toStartOfInterval(timestamp, INTERVAL {{bucket}}) AS time,
+    sql: `SELECT toDateTime(toStartOfInterval(toTimeZone(timestamp, {{tz}}), INTERVAL {{bucket}})) AS time,
        round(1000 * countIf(type = 'error') / nullIf(countIf(type = 'pageview'), 0), 1) AS errors_per_1k_pageviews
 FROM scoped_events
 GROUP BY time
@@ -963,7 +963,7 @@ LIMIT 50`,
     beyondPrebuilt: true,
     vizType: "line",
     mapping: { xColumn: "time", yColumns: ["lcp_p75", "inp_p75"] },
-    sql: `SELECT toStartOfInterval(timestamp, INTERVAL {{bucket}}) AS time,
+    sql: `SELECT toDateTime(toStartOfInterval(toTimeZone(timestamp, {{tz}}), INTERVAL {{bucket}})) AS time,
        round(quantile(0.75)(lcp)) AS lcp_p75,
        round(quantile(0.75)(inp)) AS inp_p75
 FROM scoped_events
@@ -1158,7 +1158,7 @@ LIMIT 50`,
     beyondPrebuilt: true,
     vizType: "line",
     mapping: { xColumn: "time", yColumns: ["sessions"], seriesColumn: "channel" },
-    sql: `SELECT toStartOfInterval(timestamp, INTERVAL {{bucket}}) AS time,
+    sql: `SELECT toDateTime(toStartOfInterval(toTimeZone(timestamp, {{tz}}), INTERVAL {{bucket}})) AS time,
        channel,
        countDistinct(session_id) AS sessions
 FROM scoped_events

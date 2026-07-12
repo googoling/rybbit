@@ -142,25 +142,29 @@ function calculateBotSignals(): BotSignalResult {
       const canvas = document.createElement("canvas");
       const gl = (canvas.getContext("webgl") || canvas.getContext("experimental-webgl")) as WebGLRenderingContext | null;
       if (gl) {
-        const rendererParts: string[] = [];
-        const rendererRaw = gl.getParameter(gl.RENDERER);
-        if (typeof rendererRaw === "string") {
-          rendererParts.push(rendererRaw);
-        }
         try {
-          type WebGlDebugRendererInfo = {UNMASKED_RENDERER_WEBGL:number};
-          const debugInfo = gl.getExtension("WEBGL_debug_renderer_info") as WebGlDebugRendererInfo | null;
-          if (debugInfo) {
-            const unmaskedRaw = gl.getParameter(debugInfo.UNMASKED_RENDERER_WEBGL);
-            if (typeof unmaskedRaw === "string") {
-              rendererParts.push(unmaskedRaw);
-            }
+          const rendererParts: string[] = [];
+          const rendererRaw = gl.getParameter(gl.RENDERER);
+          if (typeof rendererRaw === "string") {
+            rendererParts.push(rendererRaw);
           }
-        } catch {
-          // Firefox Privacy
-        }
-        if (rendererParts.join(" ").toLowerCase().includes("swiftshader")) {
-          addSignal(CLIENT_BOT_SIGNAL_MASKS.swiftShader, 1);
+          try {
+            type WebGlDebugRendererInfo = {UNMASKED_RENDERER_WEBGL:number};
+            const debugInfo = gl.getExtension("WEBGL_debug_renderer_info") as WebGlDebugRendererInfo | null;
+            if (debugInfo) {
+              const unmaskedRaw = gl.getParameter(debugInfo.UNMASKED_RENDERER_WEBGL);
+              if (typeof unmaskedRaw === "string") {
+                rendererParts.push(unmaskedRaw);
+              }
+            }
+          } catch {
+            // Firefox Privacy
+          }
+          if (rendererParts.join(" ").toLowerCase().includes("swiftshader")) {
+            addSignal(CLIENT_BOT_SIGNAL_MASKS.swiftShader, 1);
+          }
+        } finally {
+          releaseWebGlContext(canvas, gl);
         }
       }
     } catch {
@@ -184,6 +188,22 @@ function calculateBotSignals(): BotSignalResult {
     score: Math.min(score, MAX_BOT_SCORE),
     mask,
   };
+}
+
+/**
+ * Chrome caps live WebGL contexts per page (~16) and evicts the oldest when
+ * exceeded, so the probe context must be released eagerly rather than left
+ * to lazy GC — leaking it can break or crash host pages that use WebGL.
+ */
+function releaseWebGlContext(canvas: HTMLCanvasElement, gl: WebGLRenderingContext) {
+  try {
+    const loseContextExt = gl.getExtension("WEBGL_lose_context") as { loseContext?: () => void } | null;
+    loseContextExt?.loseContext?.();
+  } catch {
+    // best-effort cleanup
+  }
+  canvas.width = 0;
+  canvas.height = 0;
 }
 
 export function resetBotScoreCacheForTests() {

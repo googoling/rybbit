@@ -87,9 +87,23 @@ export const endpointCategories: EndpointCategory[] = [
       },
       {
         method: "GET",
-        path: "/sites/:site/verify-script",
-        name: "Verify Tracking Script",
-        description: "Checks whether the site has the tracking script installed",
+        path: "/sites/:site/excluded-paths",
+        name: "Get Excluded Paths",
+        description: "Returns the list of excluded URL paths",
+        hasCommonParams: false,
+      },
+      {
+        method: "GET",
+        path: "/sites/:site/excluded-hostnames",
+        name: "Get Excluded Hostnames",
+        description: "Returns the list of excluded hostnames",
+        hasCommonParams: false,
+      },
+      {
+        method: "GET",
+        path: "/sites/:site/excluded-user-agents",
+        name: "Get Excluded User Agents",
+        description: "Returns the list of excluded user-agent patterns",
         hasCommonParams: false,
       },
       {
@@ -185,6 +199,53 @@ export const endpointCategories: EndpointCategory[] = [
     ],
   },
   {
+    name: "Teams",
+    endpoints: [
+      {
+        method: "GET",
+        path: "/organizations/:organizationId/teams",
+        name: "Get Teams",
+        description: "Returns the teams in an organization with members and sites",
+        hasCommonParams: false,
+        pathParams: ["organizationId"],
+      },
+      {
+        method: "POST",
+        path: "/organizations/:organizationId/teams",
+        name: "Create Team",
+        description: "Creates a team. Requires admin/owner role.",
+        hasCommonParams: false,
+        pathParams: ["organizationId"],
+        hasRequestBody: true,
+        requestBodyExample: {
+          name: "Marketing",
+          memberUserIds: [],
+          siteIds: [],
+        },
+      },
+      {
+        method: "PUT",
+        path: "/organizations/:organizationId/teams/:teamId",
+        name: "Update Team",
+        description: "Updates a team's name, members, or sites. Requires admin/owner role.",
+        hasCommonParams: false,
+        pathParams: ["organizationId", "teamId"],
+        hasRequestBody: true,
+        requestBodyExample: {
+          name: "Growth",
+        },
+      },
+      {
+        method: "DELETE",
+        path: "/organizations/:organizationId/teams/:teamId",
+        name: "Delete Team",
+        description: "Deletes a team. Requires admin/owner role.",
+        hasCommonParams: false,
+        pathParams: ["organizationId", "teamId"],
+      },
+    ],
+  },
+  {
     name: "Overview",
     endpoints: [
       {
@@ -196,7 +257,7 @@ export const endpointCategories: EndpointCategory[] = [
       },
       {
         method: "GET",
-        path: "/sites/:site/overview-bucketed",
+        path: "/sites/:site/overview/time-series",
         name: "Get Overview (Time Series)",
         description: "Returns time-series analytics data broken down by time buckets",
         hasCommonParams: true,
@@ -249,7 +310,7 @@ export const endpointCategories: EndpointCategory[] = [
       },
       {
         method: "GET",
-        path: "/sites/:site/events/bucketed",
+        path: "/sites/:site/events/time-series",
         name: "Get Event Time Series",
         description: "Returns time-series counts for top custom events",
         hasCommonParams: true,
@@ -286,7 +347,7 @@ export const endpointCategories: EndpointCategory[] = [
     endpoints: [
       {
         method: "GET",
-        path: "/sites/:site/error-names",
+        path: "/sites/:site/errors/names",
         name: "Get Error Names",
         description: "Returns unique error messages with occurrence and session counts",
         hasCommonParams: true,
@@ -294,7 +355,7 @@ export const endpointCategories: EndpointCategory[] = [
       },
       {
         method: "GET",
-        path: "/sites/:site/error-events",
+        path: "/sites/:site/errors/events",
         name: "Get Error Events",
         description: "Returns individual error occurrences with context and stack traces",
         hasCommonParams: true,
@@ -303,12 +364,65 @@ export const endpointCategories: EndpointCategory[] = [
       },
       {
         method: "GET",
-        path: "/sites/:site/error-bucketed",
+        path: "/sites/:site/errors/time-series",
         name: "Get Error Time Series",
         description: "Returns error occurrence counts over time",
         hasCommonParams: true,
         requiredParams: ["errorMessage"],
         specificParams: ["errorMessage", "bucket"],
+      },
+    ],
+  },
+  {
+    name: "Bots",
+    endpoints: [
+      {
+        method: "GET",
+        path: "/sites/:site/bots/overview",
+        name: "Get Bot Overview",
+        description: "Returns aggregate bot-traffic metrics with a breakdown by detection layer",
+        hasCommonParams: true,
+        specificParams: ["layer"],
+      },
+      {
+        method: "GET",
+        path: "/sites/:site/bots/time-series",
+        name: "Get Bot Time Series",
+        description: "Returns bot request counts over time",
+        hasCommonParams: true,
+        specificParams: ["bucket", "layer"],
+      },
+      {
+        method: "GET",
+        path: "/sites/:site/bots/by-dimension",
+        name: "Get Bots by Dimension",
+        description: "Returns bot requests broken down by a dimension",
+        hasCommonParams: true,
+        requiredParams: ["dimension"],
+        specificParams: ["dimension", "limit", "page", "layer"],
+        parameterMetadata: {
+          dimension: {
+            label: "Dimension",
+            type: "select",
+            options: [
+              "browser",
+              "browser_version",
+              "operating_system",
+              "operating_system_version",
+              "country",
+              "region",
+              "city",
+              "device_type",
+              "referrer",
+              "hostname",
+              "pathname",
+              "dimensions",
+              "asn_org",
+              "bot_category",
+              "matched_ua_pattern",
+            ],
+          },
+        },
       },
     ],
   },
@@ -322,6 +436,15 @@ export const endpointCategories: EndpointCategory[] = [
         description: "Returns paginated list of goals with conversion metrics",
         hasCommonParams: true,
         specificParams: ["page", "page_size", "sort", "order"],
+      },
+      {
+        method: "GET",
+        path: "/sites/:site/goals/time-series",
+        name: "Get Goal Time Series",
+        description: "Returns goal conversions and conversion rate over time",
+        hasCommonParams: true,
+        requiredParams: ["goal_ids"],
+        specificParams: ["goal_ids", "bucket"],
       },
       {
         method: "GET",
@@ -539,7 +662,7 @@ export const endpointCategories: EndpointCategory[] = [
       },
       {
         method: "GET",
-        path: "/sites/:site/session-locations",
+        path: "/sites/:site/sessions/locations",
         name: "Get Session Locations",
         description: "Returns aggregated session locations for map visualization",
         hasCommonParams: true,
@@ -727,6 +850,11 @@ export const parameterMetadata: Record<string, ParameterMetadata> = {
     type: "select",
     options: ["pathname", "country", "region", "browser", "operating_system", "device_type"],
   },
+  layer: {
+    label: "Layer",
+    type: "select",
+    options: ["ua_pattern", "header_heuristics", "client_signals", "bot_asn", "rate_anomaly"],
+  },
   mode: {
     label: "Mode",
     type: "select",
@@ -781,7 +909,9 @@ export const parameterMetadata: Record<string, ParameterMetadata> = {
   // Path params
   orgId: { label: "Organization ID", type: "text", placeholder: "org_abc123" },
   goalId: { label: "Goal ID", type: "number", placeholder: "Goal ID" },
+  goal_ids: { label: "Goal IDs", type: "text", placeholder: "e.g. 1,2" },
   funnelId: { label: "Funnel ID", type: "number", placeholder: "Funnel ID" },
+  teamId: { label: "Team ID", type: "text", placeholder: "team_abc123" },
   sessionId: { label: "Session ID", type: "text", placeholder: "Session ID" },
   stepNumber: { label: "Step Number", type: "number", placeholder: "Step number (1-indexed)" },
   siteId: { label: "Site ID", type: "number", placeholder: "Site ID" },

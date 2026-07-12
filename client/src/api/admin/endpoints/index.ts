@@ -8,9 +8,8 @@ export {
   fetchSitesFromOrg,
   fetchSiteHasData,
   fetchSiteIsPublic,
-  verifyScript,
 } from "./sites";
-export type { SiteResponse, GetSitesFromOrgResponse, VerifyScriptResponse } from "./sites";
+export type { SiteResponse, GetSitesFromOrgResponse } from "./sites";
 
 // Organizations endpoints
 export {
@@ -57,6 +56,24 @@ export type {
   UpdateExcludedCountriesRequest,
   UpdateExcludedCountriesResponse,
 } from "./excludedCountries";
+
+// Excluded Paths / Hostnames / User Agents endpoints
+export {
+  fetchExcludedPaths,
+  updateExcludedPaths,
+  fetchExcludedHostnames,
+  updateExcludedHostnames,
+  fetchExcludedUserAgents,
+  updateExcludedUserAgents,
+} from "./exclusions";
+export type {
+  ExcludedPathsResponse,
+  ExcludedHostnamesResponse,
+  ExcludedUserAgentsResponse,
+  UpdateExcludedPathsRequest,
+  UpdateExcludedHostnamesRequest,
+  UpdateExcludedUserAgentsRequest,
+} from "./exclusions";
 
 // Account Settings endpoints
 export { updateAccountSettings } from "./accountSettings";

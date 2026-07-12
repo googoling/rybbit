@@ -128,6 +128,9 @@ export function updateSiteConfig(
     blockBots?: boolean;
     excludedIPs?: string[];
     excludedCountries?: string[];
+    excludedPaths?: string[];
+    excludedHostnames?: string[];
+    excludedUserAgents?: string[];
     sessionReplay?: boolean;
     webVitals?: boolean;
     trackErrors?: boolean;
@@ -163,15 +166,4 @@ export function fetchSiteHasData(siteId: string) {
 
 export function fetchSiteIsPublic(siteId: string | number) {
   return authedFetch<{ isPublic: boolean }>(`/sites/${siteId}/is-public`);
-}
-
-export interface VerifyScriptResponse {
-  scriptTagFound: boolean;
-  scriptExecuted: boolean;
-  siteIdMatch: boolean;
-  issues: string[];
-}
-
-export function verifyScript(siteId: number | string) {
-  return authedFetch<VerifyScriptResponse>(`/sites/${siteId}/verify-script`);
 }

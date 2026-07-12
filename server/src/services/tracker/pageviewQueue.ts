@@ -99,12 +99,14 @@ class PageviewQueue {
         event_name: pv.event_name || "",
         props: getParsedProperties(pv.properties),
         url_parameters: allUrlParams,
-        // Performance metrics (only included for performance events)
-        lcp: pv.lcp || null,
-        cls: pv.cls || null,
-        inp: pv.inp || null,
-        fcp: pv.fcp || null,
-        ttfb: pv.ttfb || null,
+        // Performance metrics (only included for performance events).
+        // ?? not ||: 0 is a legitimate measurement (a perfect CLS score is 0)
+        // and must not be coerced to NULL, which would skew percentiles.
+        lcp: pv.lcp ?? null,
+        cls: pv.cls ?? null,
+        inp: pv.inp ?? null,
+        fcp: pv.fcp ?? null,
+        ttfb: pv.ttfb ?? null,
         ip: pv.storeIp ? pv.ipAddress : null,
         timezone: timezone,
         tag: pv.tag || "",

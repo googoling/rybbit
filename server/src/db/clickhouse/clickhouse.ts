@@ -36,6 +36,62 @@ async function execClickhouseInitStep(
   }
 }
 
+type ColumnDefinition = {
+  name: string;
+  definition: string;
+};
+
+const EVENTS_COLUMNS_TO_ENSURE: ColumnDefinition[] = [
+  { name: "lcp", definition: "lcp Nullable(Float64)" },
+  { name: "cls", definition: "cls Nullable(Float64)" },
+  { name: "inp", definition: "inp Nullable(Float64)" },
+  { name: "fcp", definition: "fcp Nullable(Float64)" },
+  { name: "ttfb", definition: "ttfb Nullable(Float64)" },
+  { name: "ip", definition: "ip Nullable(String)" },
+  { name: "timezone", definition: "timezone LowCardinality(String) DEFAULT ''" },
+  { name: "identified_user_id", definition: "identified_user_id String DEFAULT ''" },
+  { name: "import_id", definition: "import_id Nullable(UUID)" },
+  { name: "tag", definition: "tag LowCardinality(String) DEFAULT ''" },
+  { name: "feature_flags", definition: "feature_flags Map(String, String) DEFAULT map()" },
+];
+
+async function getTableColumns(table: string) {
+  const result = await clickhouse.query({
+    query: `
+      SELECT name
+      FROM system.columns
+      WHERE database = currentDatabase()
+        AND table = {table:String}
+    `,
+    query_params: { table },
+    format: "JSONEachRow",
+  });
+
+  const rows = await result.json<{ name: string }>();
+  return new Set(rows.map(row => row.name));
+}
+
+async function ensureEventsColumns() {
+  const existingColumns = await getTableColumns("events");
+  const missingColumns = EVENTS_COLUMNS_TO_ENSURE.filter(column => !existingColumns.has(column.name));
+
+  if (missingColumns.length === 0) {
+    logger.debug("Events table columns are up to date");
+    return;
+  }
+
+  logger.info({ missingColumns: missingColumns.map(column => column.name) }, "Adding missing events table columns");
+
+  await execClickhouseInitStep(
+    "add missing events columns",
+    `
+      ALTER TABLE events
+        ${missingColumns.map(column => `ADD COLUMN IF NOT EXISTS ${column.definition}`).join(",\n        ")}
+      `,
+    { lockAcquireTimeoutSeconds: 15 }
+  );
+}
+
 export const initializeClickhouse = async () => {
   // Create events table
   await execClickhouseInitStep(
@@ -68,7 +124,18 @@ export const initializeClickhouse = async () => {
         device_type LowCardinality(String),
         type LowCardinality(String) DEFAULT 'pageview',
         event_name String,
-        props JSON
+        props JSON,
+        lcp Nullable(Float64),
+        cls Nullable(Float64),
+        inp Nullable(Float64),
+        fcp Nullable(Float64),
+        ttfb Nullable(Float64),
+        ip Nullable(String),
+        timezone LowCardinality(String) DEFAULT '',
+        identified_user_id String DEFAULT '',
+        import_id Nullable(UUID),
+        tag LowCardinality(String) DEFAULT '',
+        feature_flags Map(String, String) DEFAULT map()
       )
       ENGINE = MergeTree()
       PARTITION BY toYYYYMM(timestamp)
@@ -76,13 +143,10 @@ export const initializeClickhouse = async () => {
       `
   );
 
-  await execClickhouseInitStep(
-    "add feature flag assignments to events table",
-    `
-      ALTER TABLE events
-        ADD COLUMN IF NOT EXISTS feature_flags Map(String, String) DEFAULT map()
-      `
-  );
+  // Heal tables created by older versions (or by the window where the CREATE
+  // TABLE above was missing these columns). Only columns that are actually
+  // missing are altered in — even a no-op ALTER needs the events table ALTER lock.
+  await ensureEventsColumns();
 
   await execClickhouseInitStep(
     "create bot events table",

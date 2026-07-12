@@ -34,6 +34,13 @@ Shared upstream files heatmap edits IN PLACE (the real conflict surface):
 
 Deploy default image tag is `heatmap`; health check verifies `heatmap_events` / `heatmap_snapshots` tables exist.
 
+Drizzle migration: our heatmap columns live in `server/drizzle/0010_add_heatmaps.sql` (idempotent
+`IF NOT EXISTS`). It was `0009_add_heatmaps` until the v2.7.0 merge, where upstream's own
+`0009_ambiguous_gabe_jones` collided; ours was regenerated as 0010 chained after upstream's 0009.
+If a future upstream release ships its own 0010, renumber ours again the same way
+(delete ours + `drizzle-kit generate --name add_heatmaps`, then re-add `IF NOT EXISTS`).
+Safe on the prod DB either way — every statement is idempotent.
+
 ### Mailbo integration (our feature — `server/src/custom/mailbo/`, `client/src/custom/mailbo/`)
 Rybbit → Mailbo intent sync. Self-contained module (conflict-proof). Spec in
 `server/src/custom/mailbo/SPEC.md`. Custom tables via `schema.sql` (applied manually — no auto-migration).
@@ -53,7 +60,7 @@ Shared upstream files it hooks into (protect on merge):
 | `client/src/lib/heatmap/renderHeatmap.ts` | Heatmap rendering tweaks (overlay opacity, click rendering). | Heatmaps rebuild work |
 | `server/src/api/heatmap/getClickHeatmap.ts` | Click heatmap query changes. | Heatmaps rebuild work |
 | `server/src/services/tracker/utils.ts` | `clearSelfReferrer` now strips `www.` and treats subdomain relationships both ways as internal (e.g. `app.decorai.io` ↔ `decorai.io`), so cross-subdomain self-referrals don't pollute the Referrers list. | `// CUSTOM` |
-| Sidebar nav component | Hide **Query** and **Dashboards** nav items. | `0736bbf0` |
+| ~~Sidebar nav component~~ | ~~Hide **Query** and **Dashboards** nav items.~~ Upstream v2.7.0 comments the block out itself — our edit is no longer needed; we carry upstream's version. | `0736bbf0`, retired in v2.7.0 merge |
 | Heatmaps UI (Click tab) | Active-pill styling, transparent caret split-button, adjustable overlay opacity slider. | `77e22bc0`, `e9b54bc9`, `5f063935` |
 
 > Tagging feature was upstream PR #941 (merged), not a local customization.

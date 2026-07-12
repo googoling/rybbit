@@ -64,16 +64,11 @@ export async function getFunnelStepSessions(req: FastifyRequest<GetFunnelStepSes
   try {
     const timeStatement = getTimeStatement(req.query);
 
-    // Use fieldMappings since the CTE extracts UTM params as separate columns
-    const filterStatement = getFilterStatement(req.query.filters, Number(siteId), timeStatement, {
-      fieldMappings: {
-        "url_parameters['utm_source']": "utm_source",
-        "url_parameters['utm_medium']": "utm_medium",
-        "url_parameters['utm_campaign']": "utm_campaign",
-        "url_parameters['utm_term']": "utm_term",
-        "url_parameters['utm_content']": "utm_content",
-      },
-    });
+    // Applied once, in the SessionActions CTE against raw events (same as the
+    // funnel analyze endpoint), where every filter parameter's column exists.
+    // Re-applying it to the aggregated outer query breaks on parameters the
+    // aggregate doesn't project (utm_*, pathname, timezone → unknown identifier).
+    const filterStatement = getFilterStatement(req.query.filters, Number(siteId), timeStatement);
 
     // Build conditional statements for each step we need
     const stepsToCheck = mode === "reached" ? stepNumber : stepNumber + 1;
@@ -251,7 +246,6 @@ export async function getFunnelStepSessions(req: FastifyRequest<GetFunnelStepSes
     )
     SELECT *
     FROM AggregatedSessions
-    WHERE 1 = 1 ${filterStatement}
     LIMIT {limit:Int32} OFFSET {offset:Int32}
     `;
 

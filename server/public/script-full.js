@@ -545,23 +545,27 @@
         const canvas = document.createElement("canvas");
         const gl = canvas.getContext("webgl") || canvas.getContext("experimental-webgl");
         if (gl) {
-          const rendererParts = [];
-          const rendererRaw = gl.getParameter(gl.RENDERER);
-          if (typeof rendererRaw === "string") {
-            rendererParts.push(rendererRaw);
-          }
           try {
-            const debugInfo = gl.getExtension("WEBGL_debug_renderer_info");
-            if (debugInfo) {
-              const unmaskedRaw = gl.getParameter(debugInfo.UNMASKED_RENDERER_WEBGL);
-              if (typeof unmaskedRaw === "string") {
-                rendererParts.push(unmaskedRaw);
-              }
+            const rendererParts = [];
+            const rendererRaw = gl.getParameter(gl.RENDERER);
+            if (typeof rendererRaw === "string") {
+              rendererParts.push(rendererRaw);
             }
-          } catch {
-          }
-          if (rendererParts.join(" ").toLowerCase().includes("swiftshader")) {
-            addSignal(CLIENT_BOT_SIGNAL_MASKS.swiftShader, 1);
+            try {
+              const debugInfo = gl.getExtension("WEBGL_debug_renderer_info");
+              if (debugInfo) {
+                const unmaskedRaw = gl.getParameter(debugInfo.UNMASKED_RENDERER_WEBGL);
+                if (typeof unmaskedRaw === "string") {
+                  rendererParts.push(unmaskedRaw);
+                }
+              }
+            } catch {
+            }
+            if (rendererParts.join(" ").toLowerCase().includes("swiftshader")) {
+              addSignal(CLIENT_BOT_SIGNAL_MASKS.swiftShader, 1);
+            }
+          } finally {
+            releaseWebGlContext(canvas, gl);
           }
         }
       } catch {
@@ -579,6 +583,15 @@
       score: Math.min(score, MAX_BOT_SCORE),
       mask
     };
+  }
+  function releaseWebGlContext(canvas, gl) {
+    try {
+      const loseContextExt = gl.getExtension("WEBGL_lose_context");
+      loseContextExt?.loseContext?.();
+    } catch {
+    }
+    canvas.width = 0;
+    canvas.height = 0;
   }
 
   // tracking.ts
@@ -1909,6 +1922,7 @@
   var MAX_PAYLOAD_BYTES = 8e6;
   var STOP_TIMEOUT_MS = 8e3;
   var RRWEB_FULL_SNAPSHOT = 2;
+  var MIN_SNAPSHOT_WIDTH = 1600;
   var HeatmapSnapshotManager = class {
     // paths attempted this page-load (in-memory)
     constructor(config) {
@@ -1975,6 +1989,10 @@
     }
     async capture() {
       if (!this.active) return;
+      if (window.innerWidth < MIN_SNAPSHOT_WIDTH) {
+        this.diag("viewport-too-narrow:" + window.innerWidth);
+        return;
+      }
       const path = this.getPathname();
       if (this.alreadyCaptured(path)) return;
       this.attempted.add(path);

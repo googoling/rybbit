@@ -92,7 +92,10 @@ export function getLiteSessionFilter(filters: string | undefined): { supported: 
     const parts = filter.value.map(
       value => `${column} ${op} ${SqlString.escape(wrapLiteLikeValue(filter.type, value))}`
     );
-    conditions.push(parts.length === 1 ? parts[0] : `(${parts.join(" OR ")})`);
+    // Negative filters must AND-join across values (NOT IN semantics): OR-joining
+    // negations is a tautology — (x != 'a' OR x != 'b') matches every row.
+    const joiner = filter.type === "not_equals" || filter.type === "not_contains" ? " AND " : " OR ";
+    conditions.push(parts.length === 1 ? parts[0] : `(${parts.join(joiner)})`);
   }
 
   return { supported: true, sql: conditions.length ? `AND ${conditions.join(" AND ")}` : "" };
@@ -118,7 +121,9 @@ export function getLiteTimeStatement(
       ? { start: Number(past_minutes_start), end: Number(past_minutes_end) }
       : undefined;
 
-  const date = start_date && end_date && time_zone ? { start_date, end_date, time_zone } : undefined;
+  // A missing time_zone must not silently discard the requested date range
+  // (that would return all-time data); dates are interpreted as UTC instead.
+  const date = start_date && end_date ? { start_date, end_date, time_zone: time_zone || "UTC" } : undefined;
 
   const sanitized = validateTimeStatementParams({ date, pastMinutesRange });
 
@@ -167,11 +172,12 @@ export function getLiteFillClause(
   params: FilterParams,
   bucket: TimeBucket
 ): string {
-  const { start_date, end_date, time_zone, past_minutes_start, past_minutes_end } = params;
+  const { start_date, end_date, past_minutes_start, past_minutes_end } = params;
+  const time_zone = params.time_zone || "UTC";
   const fn = TimeBucketToFn[bucket];
   const interval = bucketIntervalMap[bucket];
 
-  if (start_date && end_date && time_zone) {
+  if (start_date && end_date) {
     return `WITH FILL FROM toTimeZone(
       toDateTime(${fn}(toDateTime(${SqlString.escape(start_date)}, ${SqlString.escape(time_zone)}))),
       'UTC'
