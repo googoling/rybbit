@@ -21,6 +21,23 @@ correct deploy path. If asked to "update Rybbit," follow the merge workflow belo
 
 ---
 
+## Rule 0b — NEVER click GitHub's "Sync fork" button
+
+On `github.com/googoling/rybbit` the banner reads *"This branch is N commits ahead of and M commits
+behind rybbit-io/rybbit:master"* with a **Sync fork** button. Both are misleading:
+
+- **"M commits behind" is normal and expected.** GitHub compares against upstream's *moving default
+  branch* (`master`), which contains unreleased dev work. We deliberately track **release tags**, so
+  we will *always* show as "behind" master. Being behind `master` is not a problem to fix.
+- **"Sync fork" merges upstream `master` straight into `my-main`** with no conflict review, no build,
+  no test — pulling unreleased code and potentially clobbering our customizations. It is the web-UI
+  equivalent of `update.sh`.
+
+GitHub provides no way to disable this button, so the rule is simply: **don't press it.** To update,
+use the release-tag merge workflow in Rule 1 below.
+
+---
+
 ## Rule 1 — How to pull an official upstream update (safe workflow)
 
 ```bash
