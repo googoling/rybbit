@@ -106,7 +106,11 @@ export function clearSelfReferrer(referrer: string, hostname: string): string {
 
   try {
     const referrerUrl = new URL(referrer);
-    if (referrerUrl.hostname === hostname) {
+    // CUSTOM: treat www/subdomain variations of the same site as internal (e.g. app.decorai.io <-> decorai.io)
+    const strip = (d: string) => d.replace(/^www\./, "");
+    const ref = strip(referrerUrl.hostname);
+    const host = strip(hostname);
+    if (ref === host || ref.endsWith("." + host) || host.endsWith("." + ref)) {
       // Internal navigation, clear the referrer
       return "";
     }

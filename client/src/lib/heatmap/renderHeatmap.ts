@@ -108,9 +108,9 @@ export function drawHeatmap(ctx: CanvasRenderingContext2D, opts: DrawOptions): v
   clearCanvas(ctx, width, height);
   if (!points.length) return;
 
-  const radius = opts.radius ?? Math.max(12, Math.round(width / 70));
-  const blur = Math.round(radius * 0.9);
-  const minOpacity = opts.minOpacity ?? 0.1;
+  const radius = opts.radius ?? Math.max(10, Math.round(width / 90));
+  const blur = Math.round(radius * 0.5);
+  const minOpacity = opts.minOpacity ?? 0.05;
   const max = opts.max ?? percentileMax(points, 0.95);
 
   const intensity = paintIntensity(width, height, points, radius, blur, max, minOpacity);
@@ -137,9 +137,9 @@ export function drawDiffHeatmap(ctx: CanvasRenderingContext2D, opts: DrawOptions
   clearCanvas(ctx, width, height);
   if (!points.length) return;
 
-  const radius = opts.radius ?? Math.max(12, Math.round(width / 70));
-  const blur = Math.round(radius * 0.9);
-  const minOpacity = opts.minOpacity ?? 0.1;
+  const radius = opts.radius ?? Math.max(10, Math.round(width / 90));
+  const blur = Math.round(radius * 0.5);
+  const minOpacity = opts.minOpacity ?? 0.05;
   const maxAbs = opts.max ?? percentileMax(points, 0.95);
 
   const positives = points.filter(p => p.value > 0).map(p => ({ ...p, value: p.value }));

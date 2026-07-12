@@ -52,6 +52,7 @@ Shared upstream files it hooks into (protect on merge):
 | `server/src/api/analytics/goals/getGoalSessions.ts` | Prior: default `page` param to 1. | upstream PR #940 (already merged) |
 | `client/src/lib/heatmap/renderHeatmap.ts` | Heatmap rendering tweaks (overlay opacity, click rendering). | Heatmaps rebuild work |
 | `server/src/api/heatmap/getClickHeatmap.ts` | Click heatmap query changes. | Heatmaps rebuild work |
+| `server/src/services/tracker/utils.ts` | `clearSelfReferrer` now strips `www.` and treats subdomain relationships both ways as internal (e.g. `app.decorai.io` ↔ `decorai.io`), so cross-subdomain self-referrals don't pollute the Referrers list. | `// CUSTOM` |
 | Sidebar nav component | Hide **Query** and **Dashboards** nav items. | `0736bbf0` |
 | Heatmaps UI (Click tab) | Active-pill styling, transparent caret split-button, adjustable overlay opacity slider. | `77e22bc0`, `e9b54bc9`, `5f063935` |
 

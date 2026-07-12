@@ -88,7 +88,7 @@ export async function getClickHeatmap(req: FastifyRequest<GetClickHeatmapRequest
 
   // Page dimensions are always derived from plain clicks (stable regardless of mode).
   const dimsQuery = `
-    SELECT max(page_height) AS pageHeight, any(viewport_width) AS pageWidth
+    SELECT max(page_height) AS pageHeight, topK(1)(viewport_width)[1] AS pageWidth
     FROM heatmap_events
     WHERE
       site_id = {siteId:Int32}
