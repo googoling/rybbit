@@ -1922,6 +1922,7 @@
   var MAX_PAYLOAD_BYTES = 8e6;
   var STOP_TIMEOUT_MS = 8e3;
   var RRWEB_FULL_SNAPSHOT = 2;
+  var MIN_SNAPSHOT_WIDTH = 1600;
   var HeatmapSnapshotManager = class {
     // paths attempted this page-load (in-memory)
     constructor(config) {
@@ -1988,6 +1989,10 @@
     }
     async capture() {
       if (!this.active) return;
+      if (window.innerWidth < MIN_SNAPSHOT_WIDTH) {
+        this.diag("viewport-too-narrow:" + window.innerWidth);
+        return;
+      }
       const path = this.getPathname();
       if (this.alreadyCaptured(path)) return;
       this.attempted.add(path);
