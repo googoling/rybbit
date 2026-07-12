@@ -164,6 +164,26 @@ update is archaeology.
   `docker compose up -d --no-deps backend client`.
 - GitHub push and server deploy are **separate** explicit steps. Commit only when asked.
 
+### After each deploy: preserve the outgoing images (they are your rollback)
+
+`deploy.sh` always rebuilds the **same** tag (`heatmap`), which **untags the previous release's
+images and leaves them "dangling."** They look like garbage but they are the last-known-good build —
+so a routine `docker image prune` / `docker system prune` would silently destroy your fastest
+rollback path. Instead, tag them:
+
+```bash
+docker images -f dangling=true          # the outgoing release
+docker tag <backend-id> ghcr.io/rybbit-io/rybbit-backend:pre-vX.Y.Z
+docker tag <client-id>  ghcr.io/rybbit-io/rybbit-client:pre-vX.Y.Z
+# roll back by pointing docker-compose.override.yml at :pre-vX.Y.Z, then
+#   docker compose up -d --no-deps backend client
+```
+
+Currently tagged: **`:pre-v270`** (the v2.6.1 images, i.e. the state before the v2.7.0 upgrade).
+
+Disk hygiene on the server: Docker **build cache** is safe to reclaim (`docker builder prune -af` —
+a full deploy leaves several GB). **Never prune volumes** — those are the Postgres + ClickHouse data.
+
 ---
 
 ## Quick reference
