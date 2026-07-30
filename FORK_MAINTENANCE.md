@@ -47,18 +47,18 @@ from GitHub) and **does not change your local clone** until you `git pull`. It o
 commit to `origin/my-main` on GitHub.
 
 We keep a `deployed/*` tag marking each known-good, shipped state (tags are never moved by Sync
-fork). Latest: **`deployed/v2.7.0`** = `e51f1f75`.
+fork). Latest: **`deployed/v2.8.0`** = `fb18449e` (deployed 2026-07-30).
 
 ```bash
 git fetch origin --tags
-git log --oneline -3 deployed/v2.7.0        # confirm this is the state you want
+git log --oneline -3 deployed/v2.8.0        # confirm this is the state you want
 
 # Option A (local clone still clean — the usual case): just overwrite GitHub.
 git push --force-with-lease origin my-main
 
 # Option B (you already pulled the bad merge): reset local, then push.
 git checkout my-main
-git reset --hard deployed/v2.7.0            # or: git reset --hard ORIG_HEAD
+git reset --hard deployed/v2.8.0            # or: git reset --hard ORIG_HEAD
 git push --force-with-lease origin my-main
 ```
 
@@ -183,7 +183,23 @@ docker tag <client-id>  ghcr.io/rybbit-io/rybbit-client:pre-vX.Y.Z
 #   docker compose up -d --no-deps backend client
 ```
 
-Currently tagged: **`:pre-v270`** (the v2.6.1 images, i.e. the state before the v2.7.0 upgrade).
+Currently tagged: **`:pre-v280`** (the v2.7.0 images, i.e. the state before the v2.8.0 upgrade) and
+the older `:pre-v270`.
+
+**Postgres migrations are NOT a separate manual step on this stack** — `server/docker-entrypoint.sh`
+runs `npm run db:migrate` on every backend start, so a deploy applies them. The "reviewed + backed
+up" rule is therefore satisfied *before* running `deploy.sh`:
+
+```bash
+ssh faridul 'cd /home/faridul/rybbit && docker compose exec -T postgres \
+  pg_dump -U frog -d analytics --clean --if-exists | gzip > /home/faridul/backups/analytics-pre-vX.Y.Z-$(date +%Y%m%d-%H%M%S).sql.gz'
+```
+
+Note `deploy.sh` rsyncs to `rybbit-hm-build/` and only edits the live stack's
+`docker-compose.override.yml`; it never replaces `STACK_DIR/docker-compose.yml`. So upstream's
+image bumps for **clickhouse / postgres / redis are NOT applied by a deploy** (v2.8.0 proposed
+ClickHouse 25.4.2 → 26.3.17.4 and Redis 7 → 8.6.4). That is deliberate — those are separate,
+riskier upgrades to do on purpose, not as a side effect.
 
 Disk hygiene on the server: Docker **build cache** is safe to reclaim (`docker builder prune -af` —
 a full deploy leaves several GB). **Never prune volumes** — those are the Postgres + ClickHouse data.
