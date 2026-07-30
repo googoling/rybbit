@@ -62,6 +62,40 @@ const CLIENT_SIGNAL_MASKS = {
 
 type ClientSignalName = keyof typeof CLIENT_SIGNAL_MASKS;
 
+// Must mirror the weights in analytics-script/botSignals.ts — the client sends
+// one cached score, and the server recomputes it from the signal mask to split
+// it into convicting vs. corroborating evidence.
+const CLIENT_SIGNAL_WEIGHTS: Record<ClientSignalName, number> = {
+  automationApi: 3,
+  zeroOuterDimensions: 2,
+  missingChrome: 1,
+  swiftShader: 1,
+  emptyPlugins: 1,
+  defaultViewport800x600: 3,
+  defaultViewport1024x768: 3,
+  impossibleDimensions: 3,
+  outerDimensionsWeird: 2,
+  pluginApiAbsence: 0,
+};
+
+// Signals that are automation-specific enough to convict on their own. The
+// remaining (weak) signals — empty plugins, SwiftShader, zero outer dimensions,
+// missing window.chrome — all occur on real devices (Android Chrome ships empty
+// plugins; low-end GPUs fall back to SwiftShader; prerendered pages report zero
+// outer dimensions), so they corroborate other layers but never convict.
+const STRONG_CLIENT_SIGNAL_BITS =
+  CLIENT_SIGNAL_MASKS.automationApi |
+  CLIENT_SIGNAL_MASKS.impossibleDimensions |
+  CLIENT_SIGNAL_MASKS.defaultViewport800x600 |
+  CLIENT_SIGNAL_MASKS.defaultViewport1024x768;
+
+function sumClientSignalWeights(mask: number): number {
+  return Object.entries(CLIENT_SIGNAL_MASKS).reduce(
+    (total, [name, bit]) => ((mask & bit) !== 0 ? total + CLIENT_SIGNAL_WEIGHTS[name as ClientSignalName] : total),
+    0
+  );
+}
+
 export interface BotBlockingDetection {
   layer: BotDetectionMethod;
   botCategory?: string | null;
@@ -92,6 +126,8 @@ export interface BotEventProperties {
   detectedRateAnomaly: boolean;
   matchedUaPattern: string;
   botCategory: string;
+  clientBotScore?: number;
+  clientSignalMask?: number;
 }
 
 export interface BotDetectionResult {
@@ -101,7 +137,11 @@ export interface BotDetectionResult {
   eventProperties: BotEventProperties;
 }
 
-function buildBotEventProperties(detections: BotBlockingDetection[], asnInfo: AsnInfo | null): BotEventProperties {
+function buildBotEventProperties(
+  detections: BotBlockingDetection[],
+  asnInfo: AsnInfo | null,
+  clientSignalResult: ReturnType<typeof getClientSignalResult>
+): BotEventProperties {
   const detectionLayers = new Set(detections.map(detection => detection.layer));
   const uaDetection = detections.find(detection => detection.layer === "ua_pattern");
 
@@ -116,6 +156,8 @@ function buildBotEventProperties(detections: BotBlockingDetection[], asnInfo: As
     detectedRateAnomaly: detectionLayers.has("rate_anomaly"),
     matchedUaPattern: uaDetection?.matchedPattern ?? "",
     botCategory: uaDetection?.botCategory ?? "",
+    clientBotScore: clientSignalResult.scoreForStats,
+    clientSignalMask: clientSignalResult.maskForStats,
   };
 }
 
@@ -174,8 +216,14 @@ function getClientSignalResult(payload: BotBlockingPayload, userAgent: string) {
 
   const score = Math.min((hasClientScore ? payload.clientBotScore! : 0) + inferredScore, 10);
 
+  // Score contributed by strong (convicting) signals only. Derived from the
+  // mask, not the client's opaque score — a score sent without a mask cannot be
+  // decomposed, so it can only ever corroborate.
+  const strongScore = sumClientSignalWeights(mask & STRONG_CLIENT_SIGNAL_BITS);
+
   return {
     score,
+    strongScore,
     mask,
     signalNames: getClientSignalNames(mask),
     scoreForStats: hasClientScore || inferredScore > 0 ? score : undefined,
@@ -234,14 +282,24 @@ export async function checkBotBlocking({
     }
   }
 
-  // Layer 3: Client-side and client-derived bot signal score check
-  if (clientSignalResult.score >= CLIENT_BOT_SCORE_THRESHOLD) {
-    addDetection("Bot detected using client signals", {
+  // Layer 3: Client-side and client-derived bot signal score check. Only
+  // strong signals convict on their own; weak signals reaching the threshold
+  // (or a score the client sent without a mask) corroborate other layers but
+  // never convict, mirroring the generic-hosting-ASN rule below.
+  let supportingClientSignalDetection: BotBlockingDetection | null = null;
+  if (Math.max(clientSignalResult.score, clientSignalResult.strongScore) >= CLIENT_BOT_SCORE_THRESHOLD) {
+    const clientSignalDetection: BotBlockingDetection = {
       layer: "client_signals",
       clientBotScore: clientSignalResult.score,
       clientBotSignalMask: clientSignalResult.mask,
       clientSignals: clientSignalResult.signalNames,
-    });
+    };
+
+    if (clientSignalResult.strongScore >= CLIENT_BOT_SCORE_THRESHOLD) {
+      addDetection("Bot detected using client signals", clientSignalDetection);
+    } else {
+      supportingClientSignalDetection = clientSignalDetection;
+    }
   }
 
   // Layer 4: ASN check — IP belongs to hosting/cloud or curated bot provider infrastructure.
@@ -289,7 +347,13 @@ export async function checkBotBlocking({
     });
   }
 
-  if (supportingHostingAsnDetection && detections.length > 0) {
+  // Supporting evidence attaches only when a convicting layer already fired —
+  // two supporting signals must not convict each other.
+  const hasConvictingDetection = detections.length > 0;
+  if (hasConvictingDetection && supportingClientSignalDetection) {
+    addDetection("Bot detected using client signals", supportingClientSignalDetection);
+  }
+  if (hasConvictingDetection && supportingHostingAsnDetection) {
     addDetection("Bot detected using bot asn", supportingHostingAsnDetection);
   }
 
@@ -315,6 +379,6 @@ export async function checkBotBlocking({
     isBot: true,
     message: blockMessage ?? "Bot detected",
     detections,
-    eventProperties: buildBotEventProperties(detections, asnInfo),
+    eventProperties: buildBotEventProperties(detections, asnInfo, clientSignalResult),
   };
 }

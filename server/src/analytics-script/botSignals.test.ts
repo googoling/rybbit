@@ -105,6 +105,31 @@ describe("getBotScore", () => {
     expect(getBotSignalMask()).toBe(CLIENT_BOT_SIGNAL_MASKS.swiftShader);
   });
 
+  it("ignores zero outer dimensions and skips the cache while prerendering", () => {
+    function setPrerendering(value: boolean) {
+      Object.defineProperty(document, "prerendering", {
+        value,
+        configurable: true,
+      });
+    }
+
+    setPrerendering(true);
+    setWindowProperty("outerHeight", 0);
+    setWindowProperty("outerWidth", 0);
+
+    // Prerendered pages legitimately report zero outer dimensions.
+    expect(getBotScore()).toBe(0);
+    expect(getBotSignalMask()).toBe(0);
+
+    // Nothing computed during prerender may stick: after activation the real
+    // environment is re-evaluated (and this time the zeros are suspicious).
+    setPrerendering(false);
+    expect(getBotScore()).toBe(2);
+    expect(getBotSignalMask()).toBe(CLIENT_BOT_SIGNAL_MASKS.zeroOuterDimensions);
+
+    setPrerendering(undefined as unknown as boolean);
+  });
+
   it("caches the score for the page lifecycle", () => {
     setNavigatorProperty("webdriver", true);
     expect(getBotScore()).toBe(3);

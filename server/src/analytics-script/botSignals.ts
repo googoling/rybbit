@@ -36,7 +36,17 @@ export function getBotSignalMask(): number {
   return getBotSignals().mask;
 }
 
+function isPrerendering(): boolean {
+  return (document as { prerendering?: boolean }).prerendering === true;
+}
+
 function getBotSignals(): BotSignalResult {
+  // A prerendered page reports zero outer dimensions and other non-representative
+  // state. Never cache a score computed before activation — recompute fresh so
+  // post-activation events see the real environment.
+  if (isPrerendering()) {
+    return calculateBotSignals();
+  }
   cachedBotSignals ??= calculateBotSignals();
   return cachedBotSignals;
 }
@@ -89,8 +99,9 @@ function calculateBotSignals(): BotSignalResult {
       addSignal(CLIENT_BOT_SIGNAL_MASKS.automationApi, 3);
     }
 
-    // 2. Zero outer dimensions — common in headless/browserless environments
-    if (outerHeight === 0 || outerWidth === 0) {
+    // 2. Zero outer dimensions — common in headless/browserless environments.
+    //    Skipped while prerendering: Chrome legitimately reports 0 there.
+    if ((outerHeight === 0 || outerWidth === 0) && !isPrerendering()) {
       addSignal(CLIENT_BOT_SIGNAL_MASKS.zeroOuterDimensions, 2);
     }
 

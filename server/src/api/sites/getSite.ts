@@ -40,6 +40,7 @@ export async function getSite(request: FastifyRequest<GetSiteParams>, reply: Fas
       public: site.public,
       embedEnabled: site.embedEnabled,
       blockBots: site.blockBots,
+      firstPartyProxy: site.firstPartyProxy,
       trackIp: site.trackIp,
       isOwner: isOwner,
       // Analytics features
@@ -57,7 +58,7 @@ export async function getSite(request: FastifyRequest<GetSiteParams>, reply: Fas
       heatmapSampleRate: site.heatmapSampleRate,
     });
   } catch (error) {
-    console.error("Error retrieving site:", error);
+    request.log.error({ err: error }, "Error retrieving site");
     return reply.status(500).send({ error: "Internal server error" });
   }
 }

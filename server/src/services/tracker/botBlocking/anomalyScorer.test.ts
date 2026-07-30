@@ -89,6 +89,36 @@ describe("observeTrackingAnomaly (in-process fallback)", () => {
     ]);
   });
 
+  it("does not flag rapid interaction-event bursts from a real widget user", async () => {
+    // The Verge /order/ configurator case: an engaged human fires dozens of
+    // auto-captured button_clicks in seconds. Must stay below conviction.
+    let result = await observeTrackingAnomaly({ ...baseInput, eventType: "button_click" });
+    for (let i = 1; i < 90; i++) {
+      result = await observeTrackingAnomaly({
+        ...baseInput,
+        eventType: "button_click",
+        nowMs: baseInput.nowMs + i * 100,
+      });
+    }
+
+    expect(result.isAnomalous).toBe(false);
+    expect(result.counters.tupleEvents10s).toBe(0);
+  });
+
+  it("flags beyond-human interaction bursts", async () => {
+    let result = await observeTrackingAnomaly({ ...baseInput, eventType: "button_click" });
+    for (let i = 1; i <= 101; i++) {
+      result = await observeTrackingAnomaly({
+        ...baseInput,
+        eventType: "button_click",
+        nowMs: baseInput.nowMs + i,
+      });
+    }
+
+    expect(result.isAnomalous).toBe(true);
+    expect(result.reasons.map(reason => reason.rule)).toContain("tuple_interaction_events_10s");
+  });
+
   it("expires old observations outside the window", async () => {
     for (let i = 0; i < 35; i++) {
       await observeTrackingAnomaly({ ...baseInput, nowMs: baseInput.nowMs + i });
@@ -150,6 +180,35 @@ describe("observeTrackingAnomaly (Redis-backed)", () => {
     expect(result.counters.tupleDistinctPaths60s).toBe(0);
     expect(result.counters.ipDistinctHosts60s).toBe(0);
     expect(result.counters.missingClientScore60s).toBe(0);
+  });
+
+  it("never convicts on crowd rules alone (CGNAT / busy-site protection)", async () => {
+    // ip_events_60s (3) + ip_distinct_user_agents_5m (3) + ip_distinct_hosts_60s (2)
+    // + site_user_agent_events_60s (1) = 9, but zero individual evidence: a busy
+    // carrier-NAT IP on a popular site looks exactly like this.
+    // Enabled specs for pageview input: te10, te60, tdp, ie60, idua, idh, sue.
+    mocks.anomalyObserve.mockResolvedValue([1, 2, 1, 500, 40, 12, 5000]);
+
+    const result = await observeTrackingAnomaly(baseInput);
+
+    expect(result.isAnomalous).toBe(false);
+    expect(result.score).toBe(0);
+    expect(result.reasons.map(reason => reason.rule)).toEqual([
+      "ip_events_60s",
+      "ip_distinct_user_agents_5m",
+      "ip_distinct_hosts_60s",
+      "site_user_agent_events_60s",
+    ]);
+  });
+
+  it("counts crowd rules once individual evidence exists", async () => {
+    // tuple_events_10s fires (31 > 30) → crowd corroboration counts too.
+    mocks.anomalyObserve.mockResolvedValue([31, 31, 1, 500, 40, 12, 5000]);
+
+    const result = await observeTrackingAnomaly(baseInput);
+
+    expect(result.isAnomalous).toBe(true);
+    expect(result.score).toBe(4 + 3 + 3 + 2 + 1);
   });
 
   it("falls back to in-process counting when Redis fails, without throwing", async () => {

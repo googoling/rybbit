@@ -1,8 +1,8 @@
 import { FastifyReply, FastifyRequest } from "fastify";
 import { z } from "zod";
-import { getLocation } from "../../db/geolocation/geolocation.js";
 import { logger } from "../../lib/logger/logger.js";
 import { siteConfig } from "../../lib/siteConfig.js";
+import { decideSiteExclusion } from "../../services/sites/siteExclusionDecision.js";
 import { isBotUA } from "../../services/tracker/botBlocking/uaBots/index.js";
 import { sessionsService } from "../../services/sessions/sessionsService.js";
 import { heatmapQueue } from "../../services/tracker/heatmapQueue.js";
@@ -69,23 +69,16 @@ export async function recordHeatmap(
 
     const requestIP = getIpAddress(request);
 
-    if (siteConfiguration.excludedIPs && siteConfiguration.excludedIPs.length > 0) {
-      const isExcluded = await siteConfig.isIPExcluded(requestIP, request.params.siteId);
-      if (isExcluded) {
-        return reply.status(200).send({ success: true, message: "Heatmap not recorded - IP excluded" });
-      }
-    }
+    const exclusionDecision = await decideSiteExclusion(siteConfiguration, {
+      ipAddress: requestIP,
+      hostname: body.metadata.hostname,
+      userAgent,
+    });
 
-    if (siteConfiguration.excludedCountries && siteConfiguration.excludedCountries.length > 0) {
-      const locationResults = await getLocation([requestIP]);
-      const locationData = locationResults[requestIP];
-
-      if (locationData?.countryIso) {
-        const isCountryExcluded = await siteConfig.isCountryExcluded(locationData.countryIso, request.params.siteId);
-        if (isCountryExcluded) {
-          return reply.status(200).send({ success: true, message: "Heatmap not recorded - country excluded" });
-        }
-      }
+    if (exclusionDecision.excluded) {
+      return reply
+        .status(200)
+        .send({ success: true, message: `Heatmap not recorded - ${exclusionDecision.label} excluded` });
     }
 
     const identifiedUserId = body.userId ? body.userId.trim() : "";

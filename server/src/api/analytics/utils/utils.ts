@@ -107,6 +107,7 @@ export async function processResults<T>(results: ResultSet<"JSONEachRow">): Prom
         row[key] !== "" &&
         row[key] !== true &&
         row[key] !== false &&
+        !Array.isArray(row[key]) &&
         !isNaN(Number(row[key]))
       ) {
         row[key] = Number(row[key]) as any;

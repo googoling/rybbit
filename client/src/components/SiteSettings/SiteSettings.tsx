@@ -4,6 +4,7 @@ import {
   Ban,
   Code,
   Download,
+  Gauge,
   LayoutDashboard,
   LayoutTemplate,
   Mail,
@@ -19,6 +20,7 @@ import { Button } from "@/components/ui/button";
 import { Dialog, DialogClose, DialogContent, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
 import { Switch } from "@/components/ui/switch";
 import { toast } from "@/components/ui/sonner";
+import { authClient } from "@/lib/auth";
 import { cn } from "@/lib/utils";
 
 import { ScriptBuilder } from "./ScriptBuilder";
@@ -30,6 +32,7 @@ import { IntegrationsTab } from "./IntegrationsTab";
 import { EmbedTab } from "./EmbedTab";
 import { DashboardEmbedTab } from "./DashboardEmbedTab";
 import { MailboTab } from "@/custom/mailbo/MailboTab"; // CUSTOM
+import { UsageTab } from "./UsageTab";
 import { useGetSite } from "../../api/admin/hooks/useSites";
 import { useUserOrganizations } from "../../api/admin/hooks/useOrganizations";
 import { useGetSitesFromOrg } from "../../api/admin/hooks/useSites";
@@ -55,13 +58,15 @@ type TabKey =
   | "import"
   | "widget-embeds"
   | "dashboard-embed"
+  | "usage"
   | "mailbo"; // CUSTOM
 
 function SiteSettingsInner({ siteMetadata, trigger }: { siteMetadata: SiteResponse; trigger?: React.ReactNode }) {
   const t = useExtracted();
+  const { data: session } = authClient.useSession();
   const { data: userOrganizationsData } = useUserOrganizations();
   const siteOrgMembership = userOrganizationsData?.find(org => org.id === siteMetadata.organizationId);
-  const disabled = !siteOrgMembership?.role || siteOrgMembership.role === "member";
+  const disabled = session?.user.role !== "admin" && (!siteOrgMembership?.role || siteOrgMembership.role === "member");
 
   const [dialogOpen, setDialogOpen] = useState(false);
   const [activeTab, setActiveTab] = useState<TabKey>("general");
@@ -110,6 +115,7 @@ function SiteSettingsInner({ siteMetadata, trigger }: { siteMetadata: SiteRespon
     { key: "dashboard-embed", label: t("Dashboard Embed"), icon: LayoutDashboard },
     { key: "mailbo", label: "Mailbo", icon: Mail }, // CUSTOM
     { key: "import", label: t("Import"), icon: Download },
+    { key: "usage", label: t("Usage"), icon: Gauge },
   ];
 
   const visibleTabs = tabs.filter(t => !t.hidden);
@@ -193,13 +199,11 @@ function SiteSettingsInner({ siteMetadata, trigger }: { siteMetadata: SiteRespon
                 <EmbedTab siteMetadata={currentSiteMetadata} embedEnabled={embedEnabled} />
               )}
               {activeTab === "dashboard-embed" && (
-                <DashboardEmbedTab
-                  siteMetadata={currentSiteMetadata}
-                  disabled={disabled}
-                />
+                <DashboardEmbedTab siteMetadata={currentSiteMetadata} disabled={disabled} />
               )}
               {activeTab === "mailbo" && <MailboTab siteId={siteMetadata.siteId} disabled={disabled} />}{/* CUSTOM */}
               {activeTab === "import" && <ImportManager siteId={siteMetadata.siteId} disabled={disabled} />}
+              {activeTab === "usage" && <UsageTab siteId={siteMetadata.siteId} />}
             </div>
           </main>
         </div>

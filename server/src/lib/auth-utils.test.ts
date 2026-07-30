@@ -8,6 +8,7 @@ vi.mock("./auth.js", () => ({
     api: {
       getSession: vi.fn(async () => null),
       verifyApiKey: vi.fn(async () => ({ valid: false })),
+      getMcpSession: vi.fn(async () => null),
     },
   },
 }));
@@ -25,7 +26,16 @@ vi.mock("../db/postgres/postgres.js", async () => {
 
 import { db, sql } from "../db/postgres/postgres.js";
 import { member, memberSiteAccess, sites, team, teamMember, teamSiteAccess } from "../db/postgres/schema.js";
-import { getSitesUserHasAccessTo, invalidateSitesAccessCache } from "./auth-utils.js";
+import { auth } from "./auth.js";
+import {
+  checkApiKey,
+  getSitesUserHasAccessTo,
+  getUserHasAccessToSite,
+  getUserHasAdminAccessToSite,
+  getUserIdFromRequest,
+  invalidateSitesAccessCache,
+} from "./auth-utils.js";
+import { INTERNAL_BEARER_HANDOFF_HEADER, registerBearerHandoff, releaseBearerHandoff } from "./bearerAuth.js";
 import { filterSitesByMemberAccess } from "./siteAccess.js";
 
 // Only the tables getSitesUserHasAccessTo touches. Column names must match the
@@ -79,11 +89,14 @@ CREATE TABLE "sites" (
   "embed_enabled" boolean DEFAULT false,
   "saltUserIds" boolean DEFAULT false,
   "blockBots" boolean DEFAULT true NOT NULL,
+  "first_party_proxy" boolean DEFAULT false,
   "excluded_ips" jsonb DEFAULT '[]',
   "excluded_countries" jsonb DEFAULT '[]',
   "excluded_paths" jsonb DEFAULT '[]',
   "excluded_hostnames" jsonb DEFAULT '[]',
   "excluded_user_agents" jsonb DEFAULT '[]',
+  "excluded_asns" jsonb DEFAULT '[]',
+  "excluded_query_params" jsonb DEFAULT '[]',
   "sessionReplay" boolean DEFAULT false,
   "webVitals" boolean DEFAULT false,
   "trackErrors" boolean DEFAULT false,
@@ -95,6 +108,8 @@ CREATE TABLE "sites" (
   "trackButtonClicks" boolean DEFAULT false,
   "trackCopy" boolean DEFAULT false,
   "trackFormInteractions" boolean DEFAULT false,
+  "enableHeatmaps" boolean DEFAULT false,
+  "heatmapSampleRate" integer DEFAULT 100,
   "api_key" text,
   "private_link_key" text,
   "tags" jsonb DEFAULT '[]'
@@ -228,3 +243,256 @@ describe("filterSitesByMemberAccess", () => {
     expect(await filteredIdsFor(true)).toEqual([]);
   });
 });
+
+describe("checkApiKey — scope carrying", () => {
+  const request = (token = "rb_key") => ({ headers: { authorization: `Bearer ${token}` }, query: {} }) as any;
+
+  beforeEach(async () => {
+    vi.mocked(auth.api.verifyApiKey).mockReset();
+    vi.mocked(auth.api.getMcpSession as any).mockReset();
+    vi.mocked(auth.api.verifyApiKey).mockResolvedValue({ valid: false } as any);
+    vi.mocked(auth.api.getMcpSession as any).mockResolvedValue(null);
+    await db.delete(member).where(eq(member.organizationId, "org_scope"));
+    await db
+      .insert(member)
+      .values({ id: "m_scope", organizationId: "org_scope", userId: "user_scope", role: "member", createdAt: NOW });
+  });
+
+  it("carries API key permissions as statements", async () => {
+    vi.mocked(auth.api.verifyApiKey).mockResolvedValue({
+      valid: true,
+      key: { referenceId: "user_scope", permissions: { goals: ["read"] } },
+    } as any);
+
+    const result = await checkApiKey(request(), { organizationId: "org_scope" });
+
+    expect(result.valid).toBe(true);
+    expect(result.role).toBe("member");
+    expect(result.statements).toEqual({ goals: ["read"] });
+  });
+
+  it("legacy keys (null permissions) carry null statements", async () => {
+    vi.mocked(auth.api.verifyApiKey).mockResolvedValue({
+      valid: true,
+      key: { referenceId: "user_scope", permissions: null },
+    } as any);
+
+    const result = await checkApiKey(request(), { organizationId: "org_scope" });
+
+    expect(result.valid).toBe(true);
+    expect(result.statements).toBeNull();
+  });
+
+  it("carries OAuth token scopes as statements via the fallback", async () => {
+    vi.mocked(auth.api.getMcpSession as any).mockResolvedValue({
+      userId: "user_scope",
+      scopes: "openid goals:read",
+      accessTokenExpiresAt: new Date(Date.now() + 3600_000),
+    });
+
+    const result = await checkApiKey(request("oauth_token"), { organizationId: "org_scope" });
+
+    expect(result.valid).toBe(true);
+    expect(result.statements).toEqual({ goals: ["read"] });
+  });
+
+  it("OAuth tokens without custom scopes are unrestricted", async () => {
+    vi.mocked(auth.api.getMcpSession as any).mockResolvedValue({
+      userId: "user_scope",
+      scopes: "openid",
+      accessTokenExpiresAt: new Date(Date.now() + 3600_000),
+    });
+
+    const result = await checkApiKey(request("oauth_token"), { organizationId: "org_scope" });
+
+    expect(result.valid).toBe(true);
+    expect(result.statements).toBeNull();
+  });
+
+  it("reuses a valid handoff without re-verifying the key (no double rate-limit)", async () => {
+    const nonce = registerBearerHandoff("rb_key", {
+      status: "valid",
+      userId: "user_scope",
+      statements: { goals: ["read"] },
+    });
+    const req = {
+      headers: { authorization: "Bearer rb_key", [INTERNAL_BEARER_HANDOFF_HEADER]: nonce },
+      query: {},
+    } as any;
+
+    const result = await checkApiKey(req, { organizationId: "org_scope" });
+
+    expect(result.valid).toBe(true);
+    expect(result.role).toBe("member");
+    expect(result.statements).toEqual({ goals: ["read"] });
+    // The whole point: the proxied call did not hit better-auth again.
+    expect(auth.api.verifyApiKey).not.toHaveBeenCalled();
+    releaseBearerHandoff(nonce);
+  });
+
+  it("ignores a handoff whose token does not match the request and verifies normally", async () => {
+    const nonce = registerBearerHandoff("some_other_token", {
+      status: "valid",
+      userId: "user_scope",
+      statements: null,
+    });
+    vi.mocked(auth.api.verifyApiKey).mockResolvedValue({
+      valid: true,
+      key: { referenceId: "user_scope", permissions: null },
+    } as any);
+    const req = {
+      headers: { authorization: "Bearer rb_key", [INTERNAL_BEARER_HANDOFF_HEADER]: nonce },
+      query: {},
+    } as any;
+
+    const result = await checkApiKey(req, { organizationId: "org_scope" });
+
+    expect(result.valid).toBe(true);
+    // Forged/mismatched handoff falls through to real verification.
+    expect(auth.api.verifyApiKey).toHaveBeenCalledTimes(1);
+    releaseBearerHandoff(nonce);
+  });
+});
+
+describe("checkApiKey — organization-owned keys", () => {
+  const request = (token = "rb_org_key") => ({ headers: { authorization: `Bearer ${token}` }, query: {} }) as any;
+
+  // A key minted by the "org" configuration: referenceId is an org id.
+  const orgKeyVerification = (referenceId: string, permissions: unknown = null) =>
+    ({ valid: true, key: { referenceId, permissions, configId: "org" } }) as any;
+
+  beforeEach(async () => {
+    vi.mocked(auth.api.verifyApiKey).mockReset();
+    vi.mocked(auth.api.getMcpSession as any).mockReset();
+    vi.mocked(auth.api.getMcpSession as any).mockResolvedValue(null);
+    await db.insert(sites).values([
+      { id: "hex_org_a", siteId: 501, name: "org-a-site", domain: "a.example.com", organizationId: "org_a" },
+      { id: "hex_org_b", siteId: 502, name: "org-b-site", domain: "b.example.com", organizationId: "org_b" },
+    ]);
+  });
+
+  it("acts as org admin against its own organization", async () => {
+    vi.mocked(auth.api.verifyApiKey).mockResolvedValue(orgKeyVerification("org_a"));
+
+    const result = await checkApiKey(request(), { organizationId: "org_a" });
+
+    expect(result.valid).toBe(true);
+    expect(result.role).toBe("admin");
+    expect(result.organizationId).toBe("org_a");
+    expect(result.userId).toBeUndefined();
+    expect(result.statements).toBeNull();
+  });
+
+  it("grants access to a site belonging to its organization", async () => {
+    vi.mocked(auth.api.verifyApiKey).mockResolvedValue(orgKeyVerification("org_a"));
+
+    const result = await checkApiKey(request(), { siteId: 501 });
+
+    expect(result.valid).toBe(true);
+    expect(result.role).toBe("admin");
+  });
+
+  it("rejects a different organization", async () => {
+    vi.mocked(auth.api.verifyApiKey).mockResolvedValue(orgKeyVerification("org_a"));
+
+    const result = await checkApiKey(request(), { organizationId: "org_b" });
+
+    expect(result.valid).toBe(false);
+    expect(result.role).toBeNull();
+  });
+
+  it("rejects a site belonging to a different organization", async () => {
+    vi.mocked(auth.api.verifyApiKey).mockResolvedValue(orgKeyVerification("org_a"));
+
+    const result = await checkApiKey(request(), { siteId: 502 });
+
+    expect(result.valid).toBe(false);
+  });
+
+  it("rejects requests with no org or site context", async () => {
+    vi.mocked(auth.api.verifyApiKey).mockResolvedValue(orgKeyVerification("org_a"));
+
+    const result = await checkApiKey(request(), {});
+
+    expect(result.valid).toBe(false);
+  });
+
+  it("carries scoped permissions as statements", async () => {
+    vi.mocked(auth.api.verifyApiKey).mockResolvedValue(orgKeyVerification("org_a", { analytics: ["read"] }));
+
+    const result = await checkApiKey(request(), { organizationId: "org_a" });
+
+    expect(result.valid).toBe(true);
+    expect(result.statements).toEqual({ analytics: ["read"] });
+  });
+
+  it("never resolves to a user id", async () => {
+    vi.mocked(auth.api.verifyApiKey).mockResolvedValue(orgKeyVerification("org_a"));
+
+    expect(await getUserIdFromRequest(request())).toBeNull();
+  });
+
+  it("keys from the default configuration still resolve through user membership", async () => {
+    await db.delete(member).where(eq(member.organizationId, "org_a"));
+    await db
+      .insert(member)
+      .values({ id: "m_default", organizationId: "org_a", userId: "user_default", role: "member", createdAt: NOW });
+    vi.mocked(auth.api.verifyApiKey).mockResolvedValue({
+      valid: true,
+      key: { referenceId: "user_default", permissions: null, configId: "default" },
+    } as any);
+
+    const result = await checkApiKey(request("rb_user_key"), { organizationId: "org_a" });
+
+    expect(result.valid).toBe(true);
+    expect(result.role).toBe("member");
+    expect(result.userId).toBe("user_default");
+    expect(result.organizationId).toBeUndefined();
+  });
+});
+
+// Handlers re-check access internally through getSitesUserHasAccessTo (goals,
+// funnels, gsc, custom SQL). The guards attach apiKeyOrganizationId for org
+// keys; the resolver must map it to the org's full site set or every such
+// handler 403s after the guard passed.
+describe("getSitesUserHasAccessTo — organization-owned keys", () => {
+  const orgKeyRequest = (organizationId: string) =>
+    ({ headers: {}, query: {}, apiKeyOrganizationId: organizationId }) as any;
+
+  const ALL_ORG_SITES = Array.from({ length: 13 }, (_, i) => i + 1);
+
+  it("returns every site of the key's organization, ignoring team gating", async () => {
+    const result = await getSitesUserHasAccessTo(orgKeyRequest(ORG));
+    expect(result.map((s: { siteId: number }) => s.siteId).sort((a: number, b: number) => a - b)).toEqual(
+      ALL_ORG_SITES
+    );
+  });
+
+  it("passes internal re-checks for the org's sites and only those", async () => {
+    await db.insert(sites).values({
+      id: "hex_foreign",
+      siteId: 601,
+      name: "foreign-site",
+      domain: "foreign.example.com",
+      organizationId: "org_foreign",
+    });
+
+    expect(await getUserHasAccessToSite(orgKeyRequest(ORG), 1)).toBe(true);
+    expect(await getUserHasAccessToSite(orgKeyRequest(ORG), 601)).toBe(false);
+  });
+
+  it("passes admin-level re-checks (org keys act as org admin)", async () => {
+    expect(await getUserHasAdminAccessToSite(orgKeyRequest(ORG), 1)).toBe(true);
+  });
+
+  it("an attached user takes precedence over a stray org marker", async () => {
+    const req = { user: { id: "user_peer" }, headers: {}, query: {}, apiKeyOrganizationId: "org_foreign" } as any;
+    invalidateSitesAccessCache("user_peer");
+    const result = await getSitesUserHasAccessTo(req);
+    // user_peer is team-gated: sees BBC sites + non-gated site 13, not org_foreign's.
+    expect(result.map((s: { siteId: number }) => s.siteId).sort((a: number, b: number) => a - b)).toEqual([
+      1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 13,
+    ]);
+  });
+});
+
