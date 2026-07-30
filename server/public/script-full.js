@@ -67,6 +67,7 @@
   }
 
   // config.ts
+  var FEATURE_FLAG_REQUEST_TIMEOUT_MS = 2e3;
   function createVisitorId() {
     try {
       if (crypto?.randomUUID) {
@@ -102,6 +103,8 @@
     return url.pathname;
   }
   async function fetchFeatureFlags(analyticsHost, siteId, namespace, visitorId) {
+    const controller = new AbortController();
+    const timeout = window.setTimeout(() => controller.abort(), FEATURE_FLAG_REQUEST_TIMEOUT_MS);
     try {
       const url = new URL(window.location.href);
       const response = await fetch(`${analyticsHost}/site/${siteId}/feature-flags/evaluate`, {
@@ -110,6 +113,7 @@
           "Content-Type": "application/json"
         },
         credentials: "omit",
+        signal: controller.signal,
         body: JSON.stringify({
           anonymousId: visitorId,
           identifiedUserId: getIdentifiedUserId(namespace),
@@ -124,12 +128,17 @@
         })
       });
       if (!response.ok) {
-        return {};
+        return { enabled: true, flags: {} };
       }
       const data = await response.json();
-      return data?.flags && typeof data.flags === "object" ? data.flags : {};
+      return {
+        enabled: data?.featureFlagsEnabled !== false,
+        flags: data?.flags && typeof data.flags === "object" ? data.flags : {}
+      };
     } catch (e2) {
-      return {};
+      return { enabled: true, flags: {} };
+    } finally {
+      window.clearTimeout(timeout);
     }
   }
   async function parseScriptConfig(scriptTag) {
@@ -202,6 +211,7 @@
       enableHeatmaps: false,
       heatmapSampleRate: 100,
       tag,
+      featureFlagsEnabled: false,
       featureFlags: {},
       // rrweb session replay options (undefined means use rrweb defaults)
       sessionReplayBlockClass,
@@ -239,8 +249,11 @@
           trackButtonClicks: apiConfig.trackButtonClicks ?? defaultConfig.trackButtonClicks,
           trackCopy: apiConfig.trackCopy ?? defaultConfig.trackCopy,
           trackFormInteractions: apiConfig.trackFormInteractions ?? defaultConfig.trackFormInteractions,
+          featureFlagsEnabled: apiConfig.featureFlagsEnabled === true,
           enableHeatmaps: apiConfig.enableHeatmaps ?? defaultConfig.enableHeatmaps,
+          // CUSTOM
           heatmapSampleRate: apiConfig.heatmapSampleRate ?? defaultConfig.heatmapSampleRate
+          // CUSTOM
         };
       } else {
         console.warn("Failed to fetch tracking config from API, using defaults");
@@ -248,7 +261,11 @@
     } catch (error) {
       console.warn("Error fetching tracking config:", error);
     }
-    resolvedConfig.featureFlags = await fetchFeatureFlags(analyticsHost, siteId, namespace, visitorId);
+    if (resolvedConfig.featureFlagsEnabled) {
+      const result = await fetchFeatureFlags(analyticsHost, siteId, namespace, visitorId);
+      resolvedConfig.featureFlagsEnabled = result.enabled;
+      resolvedConfig.featureFlags = result.flags;
+    }
     return resolvedConfig;
   }
 
@@ -439,6 +456,12 @@
     }
     // Update user ID when it changes
     updateUserId(userId) {
+      if (userId === this.userId) {
+        return;
+      }
+      if (this.eventBuffer.length > 0) {
+        void this.flushEvents();
+      }
       this.userId = userId;
     }
     // Handle page navigation for SPAs
@@ -475,7 +498,13 @@
   function getBotSignalMask() {
     return getBotSignals().mask;
   }
+  function isPrerendering() {
+    return document.prerendering === true;
+  }
   function getBotSignals() {
+    if (isPrerendering()) {
+      return calculateBotSignals();
+    }
     cachedBotSignals ?? (cachedBotSignals = calculateBotSignals());
     return cachedBotSignals;
   }
@@ -521,7 +550,7 @@
       if (navigator.webdriver === true || hasAutomationGlobal) {
         addSignal(CLIENT_BOT_SIGNAL_MASKS.automationApi, 3);
       }
-      if (outerHeight === 0 || outerWidth === 0) {
+      if ((outerHeight === 0 || outerWidth === 0) && !isPrerendering()) {
         addSignal(CLIENT_BOT_SIGNAL_MASKS.zeroOuterDimensions, 2);
       }
       if (!Number.isFinite(screenWidth) || !Number.isFinite(screenHeight) || screenWidth <= 0 || screenHeight <= 0 || screenWidth > 1e5 || screenHeight > 1e5) {
@@ -595,6 +624,7 @@
   }
 
   // tracking.ts
+  var FEATURE_FLAG_REQUEST_TIMEOUT_MS2 = 2e3;
   var Tracker = class {
     constructor(config) {
       this.customUserId = null;
@@ -639,6 +669,9 @@
       };
     }
     async refreshFeatureFlags() {
+      if (!this.config.featureFlagsEnabled) return;
+      const controller = new AbortController();
+      const timeout = window.setTimeout(() => controller.abort(), FEATURE_FLAG_REQUEST_TIMEOUT_MS2);
       try {
         const response = await fetch(`${this.config.analyticsHost}/site/${this.config.siteId}/feature-flags/evaluate`, {
           method: "POST",
@@ -652,12 +685,18 @@
           }),
           mode: "cors",
           credentials: "omit",
-          keepalive: true
+          keepalive: true,
+          signal: controller.signal
         });
         if (!response.ok) return;
         const data = await response.json();
         this.config.featureFlags = data?.flags && typeof data.flags === "object" ? data.flags : {};
+        if (data?.featureFlagsEnabled === false) {
+          this.config.featureFlagsEnabled = false;
+        }
       } catch (e2) {
+      } finally {
+        window.clearTimeout(timeout);
       }
     }
     loadUserId() {
@@ -971,6 +1010,9 @@
       try {
         localStorage.removeItem(`${this.config.namespace}-user-id`);
       } catch (e2) {
+      }
+      if (this.sessionReplayRecorder) {
+        this.sessionReplayRecorder.updateUserId("");
       }
       void this.refreshFeatureFlags();
     }
@@ -1306,8 +1348,10 @@
   };
 
   // clickTracking.ts
+  var CLICK_THROTTLE_MS = 1e3;
   var ClickTrackingManager = class {
     constructor(tracker, config) {
+      this.lastClickAt = /* @__PURE__ */ new WeakMap();
       this.tracker = tracker;
       this.config = config;
     }
@@ -1341,6 +1385,10 @@
       const buttonElement = this.findButton(element);
       if (!buttonElement) return;
       if (buttonElement.hasAttribute("data-rybbit-event")) return;
+      const now = Date.now();
+      const lastAt = this.lastClickAt.get(buttonElement);
+      if (lastAt !== void 0 && now - lastAt < CLICK_THROTTLE_MS) return;
+      this.lastClickAt.set(buttonElement, now);
       const properties = {
         text: this.getElementText(buttonElement),
         ...this.extractDataAttributes(buttonElement)

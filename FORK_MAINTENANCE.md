@@ -7,6 +7,10 @@ keeping those features safe when upstream ships a new release.
 
 > Claude: read this file top-to-bottom before doing ANY upstream merge, `update.sh`-like
 > operation, or new-feature work. The rules here override generic instincts.
+>
+> **This file is the RULES. For an actual upstream update, execute `UPGRADE_PLAYBOOK.md`
+> step by step** — it encodes the full procedure plus `./verify-fork-intact.sh`, the sweep that
+> mechanically proves no customization was lost in conflict resolution. Never merge by feel.
 
 ---
 
@@ -191,7 +195,8 @@ a full deploy leaves several GB). **Never prune volumes** — those are the Post
 | I want to… | Do this |
 |---|---|
 | Deploy current source | `./deploy.sh` |
-| Pull an upstream release | Rule 1 workflow (merge tag on an `update/` branch) |
+| Pull an upstream release | **`UPGRADE_PLAYBOOK.md`**, start to finish |
+| Prove nothing was lost in a merge | `./verify-fork-intact.sh <old-tag> my-main` |
 | Add a new feature | New module in `server/src/custom/` or `client/src/custom/` + 1-line hook |
 | Edit an upstream file | Minimal diff, own commit, add to `CUSTOMIZATIONS.md` |
 | Update Rybbit "the easy way" | ❌ Do NOT run `update.sh` |

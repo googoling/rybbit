@@ -85,14 +85,26 @@ function isProxiedEdge(ip: string): boolean {
   return isDatacenterAsn(asn?.asn);
 }
 
-export function resolveClientIp(
-  request: FastifyRequest,
-  // Injectable for tests so branching can be exercised without the MaxMind DB.
-  proxiedEdge: (ip: string) => boolean = isProxiedEdge
-): string {
+export interface ResolveClientIpOptions {
+  /**
+   * Site-level declaration that a first-party proxy fronts this site's traffic.
+   * Skips ASN topology inference entirely: forwarded headers are trusted
+   * unconditionally, exactly like the pre-ASN `getIpAddress` precedence.
+   */
+  firstPartyProxy?: boolean;
+  /** Injectable for tests so branching can be exercised without the MaxMind DB. */
+  proxiedEdge?: (ip: string) => boolean;
+}
+
+export function resolveClientIp(request: FastifyRequest, options: ResolveClientIpOptions = {}): string {
+  const proxiedEdge = options.proxiedEdge ?? isProxiedEdge;
   const realIp = realIpHeader(request);
   const xffFirst = firstForwardedFor(request);
   const cfIp = cfConnectingIp(request);
+
+  if (options.firstPartyProxy) {
+    return realIp ?? xffFirst ?? cfIp ?? getIpAddress(request);
+  }
 
   if (cfIp) {
     if (proxiedEdge(cfIp)) {
@@ -109,4 +121,36 @@ export function resolveClientIp(
   // corroborate, so defer to plain header precedence (X-Real-IP, then
   // X-Forwarded-For, then the socket IP).
   return getIpAddress(request);
+}
+
+/**
+ * Every IP this request could plausibly belong to, resolved or not: the
+ * Cloudflare edge IP, X-Real-IP, every X-Forwarded-For hop, and the socket.
+ *
+ * For IP *exclusion* only — where over-matching is the desired failure mode
+ * (worst case, a stray event from someone sharing an IP with the site owner is
+ * dropped). Never use this for identity, geo, or anything spoofing-sensitive.
+ */
+export function collectCandidateClientIps(
+  request: FastifyRequest,
+  extra: Array<string | null | undefined> = []
+): string[] {
+  const forwardedFor = request.headers["x-forwarded-for"];
+  const forwardedEntries =
+    forwardedFor && typeof forwardedFor === "string"
+      ? forwardedFor
+          .split(",")
+          .map(ip => ip.trim())
+          .filter(Boolean)
+      : [];
+
+  const candidates = [
+    ...extra,
+    cfConnectingIp(request),
+    realIpHeader(request),
+    ...forwardedEntries,
+    request.ip,
+  ].filter((ip): ip is string => Boolean(ip));
+
+  return [...new Set(candidates)];
 }

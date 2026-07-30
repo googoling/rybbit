@@ -31,9 +31,10 @@ export interface ScriptConfig {
   trackButtonClicks: boolean;
   trackCopy: boolean;
   trackFormInteractions: boolean;
-  enableHeatmaps: boolean;
-  heatmapSampleRate: number;
+  enableHeatmaps?: boolean; // CUSTOM
+  heatmapSampleRate?: number; // CUSTOM
   tag: string;
+  featureFlagsEnabled: boolean;
   featureFlags: Record<string, FeatureFlagAssignment>;
 }
 

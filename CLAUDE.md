@@ -5,6 +5,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 ## ⚠️ This is a customized FORK of open-source Rybbit — read first
 
 - **`FORK_MAINTENANCE.md`** (repo root) — MANDATORY before any upstream update or new-feature work. Covers the safe upstream-merge workflow, the "never run `update.sh`" rule, and the module convention.
+- **`UPGRADE_PLAYBOOK.md`** (repo root) — MANDATORY, step-by-step, for "rybbit got an update". The exact procedure, including `./verify-fork-intact.sh` which mechanically proves no customization was lost. Follow it in order; do not improvise an upstream merge.
 - **`CUSTOMIZATIONS.md`** (repo root) — the divergence map: every upstream file we edited in place. Keep it current.
 - **New features are always modules**: add them under `server/src/custom/<feature>/` or `client/src/custom/<feature>/` and wire in with a single `// CUSTOM`-tagged line. Prefer new files over editing upstream files.
 - **Deploy with `./deploy.sh`** (builds our source into images on ssh host `faridul`). Never `update.sh`.
@@ -15,7 +16,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 - Server: `cd server && npm run dev` (TypeScript backend)
 - Lint: `cd client && npm run lint` or `cd server && npm run build`
 - TypeCheck: `cd client && tsc --noEmit` or `cd server && tsc`
-- Database: `cd server && npm run db:push` (update DB schema)
+- Database: `cd server && npm run db:generate` (generate migration files after schema changes; applied with `npm run db:migrate`)
 
 ## Code Conventions
 

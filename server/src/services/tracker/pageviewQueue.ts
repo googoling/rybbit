@@ -1,8 +1,10 @@
 import { DateTime } from "luxon";
 import { clickhouse } from "../../db/clickhouse/clickhouse.js";
+import { lookupAsn } from "../../db/geolocation/asn.js";
 import { getLocation } from "../../db/geolocation/geolocation.js";
 import { createServiceLogger } from "../../lib/logger/logger.js";
 import { getDeviceType } from "../../utils.js";
+import { isDatacenterAsn } from "./botBlocking/datacenterAsns.js";
 import { getChannel } from "./getChannel.js";
 import { clearSelfReferrer, getAllUrlParams, TotalTrackingPayload } from "./utils.js";
 
@@ -63,6 +65,12 @@ class PageviewQueue {
       const city = dataForIp?.city || "";
       const timezone = dataForIp?.timeZone || "";
 
+      // Same MaxMind lookup already used to decide identity bucketing
+      // (bucketIpForIdentity) and bot-detection eligibility; stored here purely
+      // for debugging identity-splitting reports, treated like geo data
+      // (independent of storeIp) since it identifies a network, not a device.
+      const asnInfo = lookupAsn(pv.ipAddress);
+
       // Check if referrer is from the same domain and clear it if so
       let referrer = clearSelfReferrer(pv.referrer || "", pv.hostname || "");
 
@@ -112,6 +120,9 @@ class PageviewQueue {
         tag: pv.tag || "",
         feature_flags: pv.feature_flags || {},
         import_id: null,
+        asn: asnInfo?.asn ?? null,
+        asn_org: asnInfo?.organization || "",
+        is_datacenter_asn: asnInfo && isDatacenterAsn(asnInfo.asn) ? 1 : 0,
       };
     });
 
@@ -124,7 +135,7 @@ class PageviewQueue {
         format: "JSONEachRow",
       });
     } catch (error) {
-      this.logger.error(error, "Error processing pageview queue");
+      this.logger.error({ err: error }, "Error processing pageview queue");
     } finally {
       this.processing = false;
     }

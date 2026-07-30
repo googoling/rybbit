@@ -16,6 +16,19 @@ export const MAPBOX_TOKEN = process.env.MAPBOX_TOKEN;
 
 export const DEFAULT_EVENT_LIMIT = 3_000;
 
+// Event types that count toward an organization's monthly usage limit.
+// Keep in sync with billing/usage docs; used by the usage cron and per-site usage endpoint.
+export const USAGE_COUNTED_EVENT_TYPES = [
+  "pageview",
+  "custom_event",
+  "performance",
+  "outbound",
+  "button_click",
+  "copy",
+  "form_submit",
+  "input_change",
+] as const;
+
 // Site and member limits per plan tier
 export const FREE_SITE_LIMIT = 1;
 export const FREE_MEMBER_LIMIT = 1;
@@ -28,6 +41,11 @@ export const STANDARD_MEMBER_LIMIT = 3;
 export const API_RATE_LIMIT_WINDOW = 60_000; // 1 minute
 export const STANDARD_API_RATE_LIMIT = 20; // 20 req/min
 export const PRO_API_RATE_LIMIT = 200; // 200 req/min
+
+// Maximum number of API keys per owner (a user or an organization)
+export const STANDARD_API_KEY_LIMIT = 5;
+export const PRO_API_KEY_LIMIT = 20;
+export const SELF_HOSTED_API_KEY_LIMIT = 50;
 
 export const APPSUMO_SITE_LIMITS: Record<string, number | null> = {
   "1": 3,

@@ -29,6 +29,7 @@ interface AnomalyReason {
 export interface AnomalyCounters {
   tupleEvents10s: number;
   tupleEvents60s: number;
+  tupleInteractionEvents10s: number;
   tupleDistinctPaths60s: number;
   ipEvents60s: number;
   ipDistinctUserAgents5m: number;
@@ -36,6 +37,15 @@ export interface AnomalyCounters {
   siteUserAgentEvents60s: number;
   missingClientScore60s: number;
 }
+
+/**
+ * Auto-captured interaction events fire in rapid, legitimate bursts — a human on
+ * a configurator, slider, or spinner can exceed crawler-tuned event rates (the
+ * Verge /order/ incident: engaged customers blocked as bots). These types are
+ * excluded from the general tuple event counters and policed by a dedicated
+ * burst rule with a beyond-human threshold instead.
+ */
+const INTERACTION_EVENT_TYPES = new Set(["button_click", "input_change", "copy"]);
 
 export interface AnomalyInput {
   siteId: string;
@@ -105,6 +115,7 @@ class RollingDistinctCounter {
 
 const tupleEvents10s = new RollingCounter();
 const tupleEvents60s = new RollingCounter();
+const tupleInteractionEvents10s = new RollingCounter();
 const ipEvents60s = new RollingCounter();
 const siteUserAgentEvents60s = new RollingCounter();
 const missingClientScore60s = new RollingCounter();
@@ -185,6 +196,7 @@ function maybeCleanup(nowMs: number) {
 
   tupleEvents10s.cleanup(nowMs, 10 * SECOND);
   tupleEvents60s.cleanup(nowMs, MINUTE);
+  tupleInteractionEvents10s.cleanup(nowMs, 10 * SECOND);
   ipEvents60s.cleanup(nowMs, MINUTE);
   siteUserAgentEvents60s.cleanup(nowMs, MINUTE);
   missingClientScore60s.cleanup(nowMs, MINUTE);
@@ -217,11 +229,12 @@ function buildCounterPlan(input: AnomalyInput, nowMs: number): CounterPlan[] {
   const ipKey = `${siteId}:${ipAddress}`;
   const siteUserAgentKey = `${siteId}:${userAgentHash}`;
   const eventToken = nextEventToken(nowMs);
+  const isInteraction = INTERACTION_EVENT_TYPES.has(input.eventType ?? "");
 
   return [
     {
       name: "tupleEvents10s",
-      enabled: true,
+      enabled: !isInteraction,
       redisKey: `bot:a:te10:${tupleKey}`,
       member: eventToken,
       windowMs: 10 * SECOND,
@@ -230,12 +243,21 @@ function buildCounterPlan(input: AnomalyInput, nowMs: number): CounterPlan[] {
     },
     {
       name: "tupleEvents60s",
-      enabled: true,
+      enabled: !isInteraction,
       redisKey: `bot:a:te60:${tupleKey}`,
       member: eventToken,
       windowMs: MINUTE,
       maxSize: MAX_COUNTER_BUCKET_SIZE,
       observeLocal: now => tupleEvents60s.observe(tupleKey, now, MINUTE),
+    },
+    {
+      name: "tupleInteractionEvents10s",
+      enabled: isInteraction,
+      redisKey: `bot:a:ti10:${tupleKey}`,
+      member: eventToken,
+      windowMs: 10 * SECOND,
+      maxSize: MAX_COUNTER_BUCKET_SIZE,
+      observeLocal: now => tupleInteractionEvents10s.observe(tupleKey, now, 10 * SECOND),
     },
     {
       name: "tupleDistinctPaths60s",
@@ -298,6 +320,7 @@ function emptyCounters(): AnomalyCounters {
   return {
     tupleEvents10s: 0,
     tupleEvents60s: 0,
+    tupleInteractionEvents10s: 0,
     tupleDistinctPaths60s: 0,
     ipEvents60s: 0,
     ipDistinctUserAgents5m: 0,
@@ -337,22 +360,35 @@ function observeViaLocal(plan: CounterPlan[], nowMs: number): AnomalyCounters {
 }
 
 function computeAnomalyResult(counters: AnomalyCounters): AnomalyResult {
-  const reasons: AnomalyReason[] = [];
-  addReason(reasons, "tuple_events_10s", 4, counters.tupleEvents10s, 30, 10);
-  addReason(reasons, "tuple_events_60s", 4, counters.tupleEvents60s, 120, 60);
-  addReason(reasons, "tuple_distinct_paths_60s", 4, counters.tupleDistinctPaths60s, 25, 60);
-  addReason(reasons, "ip_events_60s", 3, counters.ipEvents60s, 200, 60);
-  addReason(reasons, "ip_distinct_user_agents_5m", 3, counters.ipDistinctUserAgents5m, 10, 300);
-  addReason(reasons, "ip_distinct_hosts_60s", 2, counters.ipDistinctHosts60s, 6, 60);
-  addReason(reasons, "site_user_agent_events_60s", 1, counters.siteUserAgentEvents60s, 300, 60);
-  addReason(reasons, "missing_client_score_60s", 1, counters.missingClientScore60s, 20, 60);
+  // Individual rules are keyed on (site, ip, ua) — they describe a single actor
+  // and may convict on their own. The interaction-burst threshold is set beyond
+  // human clicking speed (10/s sustained); ordinary widget bursts stay below it.
+  const individualReasons: AnomalyReason[] = [];
+  addReason(individualReasons, "tuple_events_10s", 4, counters.tupleEvents10s, 30, 10);
+  addReason(individualReasons, "tuple_events_60s", 4, counters.tupleEvents60s, 120, 60);
+  addReason(individualReasons, "tuple_interaction_events_10s", 4, counters.tupleInteractionEvents10s, 100, 10);
+  addReason(individualReasons, "tuple_distinct_paths_60s", 4, counters.tupleDistinctPaths60s, 25, 60);
+  addReason(individualReasons, "missing_client_score_60s", 1, counters.missingClientScore60s, 20, 60);
 
-  const score = reasons.reduce((total, reason) => total + reason.score, 0);
+  // Crowd rules are keyed on shared dimensions (ip, site+ua) that many real
+  // visitors legitimately share — one busy CGNAT IP or a popular browser on a
+  // busy site exceeds them with zero per-visitor evidence. Like generic hosting
+  // ASNs in the layer above, they corroborate but never convict: their scores
+  // count only when at least one individual rule also fired.
+  const crowdReasons: AnomalyReason[] = [];
+  addReason(crowdReasons, "ip_events_60s", 3, counters.ipEvents60s, 200, 60);
+  addReason(crowdReasons, "ip_distinct_user_agents_5m", 3, counters.ipDistinctUserAgents5m, 10, 300);
+  addReason(crowdReasons, "ip_distinct_hosts_60s", 2, counters.ipDistinctHosts60s, 6, 60);
+  addReason(crowdReasons, "site_user_agent_events_60s", 1, counters.siteUserAgentEvents60s, 300, 60);
+
+  const individualScore = individualReasons.reduce((total, reason) => total + reason.score, 0);
+  const crowdScore = crowdReasons.reduce((total, reason) => total + reason.score, 0);
+  const score = individualScore + (individualReasons.length > 0 ? crowdScore : 0);
 
   return {
     isAnomalous: score >= ANOMALY_SCORE_THRESHOLD,
     score,
-    reasons,
+    reasons: [...individualReasons, ...crowdReasons],
     counters,
   };
 }
@@ -369,7 +405,7 @@ export async function observeTrackingAnomaly(input: AnomalyInput): Promise<Anoma
       // A Redis blip must never break ingestion. Fall back to the in-process
       // counters — accuracy degrades under clustering, but detection keeps working
       // and recovers automatically once Redis is back.
-      logger.error(error as Error, "Redis anomaly counters failed; using in-process fallback");
+      logger.error({ err: error }, "Redis anomaly counters failed; using in-process fallback");
       counters = observeViaLocal(plan, nowMs);
     }
   } else {
@@ -382,6 +418,7 @@ export async function observeTrackingAnomaly(input: AnomalyInput): Promise<Anoma
 export function resetAnomalyScorerForTests() {
   tupleEvents10s.clear();
   tupleEvents60s.clear();
+  tupleInteractionEvents10s.clear();
   ipEvents60s.clear();
   siteUserAgentEvents60s.clear();
   missingClientScore60s.clear();

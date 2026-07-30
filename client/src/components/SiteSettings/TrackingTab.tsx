@@ -1,11 +1,11 @@
 "use client";
 
+import { useQueryClient } from "@tanstack/react-query";
 import { useExtracted } from "next-intl";
 import { useState, useCallback, ReactNode } from "react";
 import { toast } from "@/components/ui/sonner";
 
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
+import { Input } from "@/components/ui/input"; // CUSTOM
 import { Switch } from "@/components/ui/switch";
 
 import { updateSiteConfig, SiteResponse } from "@/api/admin/endpoints";
@@ -14,6 +14,8 @@ import { planIncludesReplay } from "@/lib/subscription/planUtils";
 import { useStripeSubscription } from "@/lib/subscription/useStripeSubscription";
 import { Badge } from "@/components/ui/badge";
 import { IS_CLOUD } from "@/lib/const";
+
+import { SettingRow, SettingsSection, SettingsSections } from "./SettingsSection";
 
 interface TrackingTabProps {
   siteMetadata: SiteResponse;
@@ -34,6 +36,7 @@ interface ToggleConfig {
 
 export function TrackingTab({ siteMetadata, disabled = false }: TrackingTabProps) {
   const t = useExtracted();
+  const queryClient = useQueryClient();
   const { refetch } = useGetSitesFromOrg(siteMetadata?.organizationId ?? "");
   const isMobileSite = siteMetadata.type === "mobile";
 
@@ -72,6 +75,8 @@ export function TrackingTab({ siteMetadata, disabled = false }: TrackingTabProps
           : `${key.replace(/([A-Z])/g, " $1").toLowerCase()} ${checked ? "enabled" : "disabled"}`;
         toast.success(message);
         refetch();
+        // Prefix match so both string- and number-keyed useGetSite instances update
+        queryClient.invalidateQueries({ queryKey: ["get-site"] });
       } catch (error) {
         console.error(`Error updating ${key}:`, error);
         toast.error(`Failed to update ${key.replace(/([A-Z])/g, " $1").toLowerCase()}`);
@@ -80,7 +85,7 @@ export function TrackingTab({ siteMetadata, disabled = false }: TrackingTabProps
         setLoadingStates(prev => ({ ...prev, [key]: false }));
       }
     },
-    [siteMetadata.siteId, refetch]
+    [siteMetadata.siteId, refetch, queryClient]
   );
 
   const saveSampleRate = useCallback(async () => {
@@ -245,17 +250,16 @@ export function TrackingTab({ siteMetadata, disabled = false }: TrackingTabProps
       : []),
   ];
 
-  const renderToggleSection = (toggles: ToggleConfig[], title: string) => (
-    <div className="space-y-4">
-      <h4 className="text-sm font-semibold text-foreground">{title}</h4>
+  const renderToggleSection = (toggles: ToggleConfig[], title: string, extra?: ReactNode) => (
+    <SettingsSection title={title}>
       {toggles.map(toggle => (
-        <div key={toggle.id} className="flex items-center justify-between">
-          <div>
-            <Label htmlFor={toggle.id} className="text-sm font-medium text-foreground flex items-center gap-2">
-              {toggle.label} {toggle.badge && IS_CLOUD && toggle.badge}
-            </Label>
-            <p className="text-xs text-muted-foreground mt-1">{toggle.description}</p>
-          </div>
+        <SettingRow
+          key={toggle.id}
+          label={toggle.label}
+          htmlFor={toggle.id}
+          description={toggle.description}
+          badge={IS_CLOUD ? toggle.badge : undefined}
+        >
           <Switch
             id={toggle.id}
             checked={toggle.value}
@@ -270,9 +274,10 @@ export function TrackingTab({ siteMetadata, disabled = false }: TrackingTabProps
               )
             }
           />
-        </div>
+        </SettingRow>
       ))}
-    </div>
+      {extra}
+    </SettingsSection>
   );
 
   const heatmapsToggles: ToggleConfig[] = !isMobileSite
@@ -290,22 +295,20 @@ export function TrackingTab({ siteMetadata, disabled = false }: TrackingTabProps
     : [];
 
   return (
-    <div className="space-y-6">
+    <SettingsSections>
       {renderToggleSection(analyticsToggles, t("Analytics Features"))}
       {renderToggleSection(autoCaptureToggles, t("Auto Capture"))}
-      {!isMobileSite && (
-        <div className="space-y-4">
-          {renderToggleSection(heatmapsToggles, t("Heatmaps"))}
-          {toggleStates.enableHeatmaps && (
-            <div className="flex items-center justify-between">
-              <div>
-                <Label htmlFor="heatmapSampleRate" className="text-sm font-medium text-foreground">
-                  {t("Sample rate (%)")}
-                </Label>
-                <p className="text-xs text-muted-foreground mt-1">
-                  {t("Percentage of sessions to capture for heatmaps")}
-                </p>
-              </div>
+      {/* CUSTOM */}
+      {!isMobileSite &&
+        renderToggleSection(
+          heatmapsToggles,
+          t("Heatmaps"),
+          toggleStates.enableHeatmaps ? (
+            <SettingRow
+              label={t("Sample rate (%)")}
+              htmlFor="heatmapSampleRate"
+              description={t("Percentage of sessions to capture for heatmaps")}
+            >
               <Input
                 id="heatmapSampleRate"
                 type="number"
@@ -317,10 +320,9 @@ export function TrackingTab({ siteMetadata, disabled = false }: TrackingTabProps
                 onChange={e => setHeatmapSampleRate(Number(e.target.value))}
                 onBlur={saveSampleRate}
               />
-            </div>
-          )}
-        </div>
-      )}
-    </div>
+            </SettingRow>
+          ) : undefined
+        )}
+    </SettingsSections>
   );
 }

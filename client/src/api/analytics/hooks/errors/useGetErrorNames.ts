@@ -1,7 +1,6 @@
-import { useStore } from "@/lib/store";
-import { useQuery, UseQueryResult } from "@tanstack/react-query";
-import { buildApiParams } from "../../../utils";
-import { fetchErrorNames, ErrorNamesPaginatedResponse } from "../../endpoints";
+import { UseQueryResult } from "@tanstack/react-query";
+import { ErrorNamesParams, ErrorNamesPaginatedResponse, fetchErrorNames } from "../../endpoints";
+import { useAnalyticsQuery } from "../../useAnalyticsQuery";
 
 type UseGetErrorNamesOptions = {
   limit?: number;
@@ -15,19 +14,12 @@ export function useGetErrorNamesPaginated({
   page = 1,
   useFilters = true,
 }: UseGetErrorNamesOptions): UseQueryResult<{ data: ErrorNamesPaginatedResponse }> {
-  const { time, site, filters, timezone } = useStore();
-
-  return useQuery({
-    queryKey: ["error-names", time, site, filters, limit, page, useFilters, timezone],
-    queryFn: async () => {
-      const data = await fetchErrorNames(site, {
-        ...buildApiParams(time, { filters: useFilters ? filters : undefined }),
-        limit,
-        page,
-      });
-      return { data };
-    },
+  return useAnalyticsQuery<{ data: ErrorNamesPaginatedResponse }, ErrorNamesParams>({
+    key: "error-names",
+    useFilters,
+    extraParams: { limit, page },
     staleTime: Infinity,
+    fetch: (site, params) => fetchErrorNames(site, params).then(data => ({ data })),
   });
 }
 
@@ -36,17 +28,11 @@ export function useGetErrorNames({
   limit = 10,
   useFilters = true,
 }: Omit<UseGetErrorNamesOptions, "page">): UseQueryResult<{ data: ErrorNamesPaginatedResponse }> {
-  const { time, site, filters, timezone } = useStore();
-
-  return useQuery({
-    queryKey: ["error-names", time, site, filters, limit, timezone],
-    queryFn: async () => {
-      const data = await fetchErrorNames(site, {
-        ...buildApiParams(time, { filters: useFilters ? filters : undefined }),
-        limit,
-      });
-      return { data };
-    },
+  return useAnalyticsQuery<{ data: ErrorNamesPaginatedResponse }, ErrorNamesParams>({
+    key: "error-names",
+    useFilters,
+    extraParams: { limit },
     staleTime: Infinity,
+    fetch: (site, params) => fetchErrorNames(site, params).then(data => ({ data })),
   });
 }
