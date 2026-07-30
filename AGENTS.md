@@ -1,0 +1,38 @@
+# AGENTS.md
+
+This file provides guidance to Codex (Codex.ai/code) when working with code in this repository.
+
+## ⚠️ This is a customized FORK of open-source Rybbit — read first
+
+- **`FORK_MAINTENANCE.md`** (repo root) — MANDATORY before any upstream update or new-feature work. Covers the safe upstream-merge workflow, the "never run `update.sh`" rule, and the module convention.
+- **`UPGRADE_PLAYBOOK.md`** (repo root) — MANDATORY, step-by-step, for "rybbit got an update". The exact procedure, including `./verify-fork-intact.sh` which mechanically proves no customization was lost. Follow it in order; do not improvise an upstream merge.
+- **`CUSTOMIZATIONS.md`** (repo root) — the divergence map: every upstream file we edited in place. Keep it current.
+- **New features are always modules**: add them under `server/src/custom/<feature>/` or `client/src/custom/<feature>/` and wire in with a single `// CUSTOM`-tagged line. Prefer new files over editing upstream files.
+- **Deploy with `./deploy.sh`** (builds our source into images on ssh host `faridul`). Never `update.sh`.
+
+## Commands
+
+- Client: `cd client && npm run dev` (NextJS with Turbopack on port 3002)
+- Server: `cd server && npm run dev` (TypeScript backend)
+- Lint: `cd client && npm run lint` or `cd server && npm run build`
+- TypeCheck: `cd client && tsc --noEmit` or `cd server && tsc`
+- Database: `cd server && npm run db:push` (update DB schema)
+
+## Code Conventions
+
+- TypeScript with strict typing throughout both client and server
+- Client: React functional components with minimal useEffect and inline functions
+- Frontend: Next.js, Tailwind CSS, Shadcn UI, Tanstack Query, Zustand, Luxon, Nivo, react-hook-form
+- Backend: Fastify, Drizzle ORM (Postgres), ClickHouse, Zod
+- Error handling: Use try/catch blocks with specific error types
+- Naming: camelCase for variables/functions, PascalCase for components/types
+- Imports: Group by external, then internal (alphabetical within groups)
+- File organization: Related functionality in same directory
+- Dark mode is default theme
+- Never run any database migration scripts
+
+## Design Context
+
+- `PRODUCT.md` (repo root) — strategic design context: register (`product`), users, purpose, brand personality, anti-references, and design principles. Read it before frontend/design work.
+- `DESIGN.md` (repo root) — visual system: color tokens, typography, components, layout. The source of truth for visual decisions.
+- The `/impeccable` skill reads both files before any design task.

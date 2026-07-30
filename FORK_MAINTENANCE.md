@@ -212,7 +212,8 @@ a full deploy leaves several GB). **Never prune volumes** — those are the Post
 |---|---|
 | Deploy current source | `./deploy.sh` |
 | Pull an upstream release | **`UPGRADE_PLAYBOOK.md`**, start to finish |
-| Prove nothing was lost in a merge | `./verify-fork-intact.sh <old-tag> my-main` |
+| Prove nothing was lost in a merge | `./verify-fork-intact.sh <old-tag> my-main` (on the `update/` branch, pre-merge) |
+| Prove the deploy is actually good | `./verify-deploy.sh` (26 prod checks) |
 | Add a new feature | New module in `server/src/custom/` or `client/src/custom/` + 1-line hook |
 | Edit an upstream file | Minimal diff, own commit, add to `CUSTOMIZATIONS.md` |
 | Update Rybbit "the easy way" | ❌ Do NOT run `update.sh` |

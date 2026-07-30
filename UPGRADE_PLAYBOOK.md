@@ -137,10 +137,15 @@ next-intl extraction. Upstream commits them sorted, so discard that churn:
 ## 5. ⚠️ THE LOSS SWEEP — the step that makes this reliable
 
 ```bash
-./verify-fork-intact.sh $OLD my-main
+./verify-fork-intact.sh $OLD my-main      # run from the update/$NEW branch, BEFORE step 7a
 ```
 
 It replays every line our fork added on top of `$OLD` and asserts each still exists.
+
+> **Timing matters.** The second argument must be the **pre-merge** ref. Run this while still on
+> `update/$NEW`, before merging into `my-main`. Once `my-main` contains the merge, `$OLD..my-main`
+> also includes all of upstream's new work, the signal is swamped, and the check stops being
+> meaningful. If you already merged, pass the pre-merge commit explicitly instead of `my-main`.
 
 - `OK` — byte-for-byte intact.
 - `CHECK` — **must be individually explained.** A CHECK is fine only if it is a deliberate
@@ -179,41 +184,122 @@ pglite and needs our two heatmap columns, or 27 tests fail.
 
 ---
 
-## 7. Ship
+## 7. Ship — in this exact order
 
-Smoke-test a running stack first: login; a dashboard with real data; **Heatmaps** (Click pills +
-overlay opacity); **Goals** (converted sessions show name/email via traits); **Mailbo** settings
-tab; sidebar nav; server logs free of ClickHouse/Postgres errors.
+> **The deploy DOES apply Postgres migrations.** `server/docker-entrypoint.sh` runs
+> `npm run db:migrate` on every backend start. There is no separate manual migration step to gate,
+> so "reviewed + backed up" has to happen *before* `deploy.sh`. Review them in step 0
+> (`git diff --name-status $OLD..$NEW -- server/drizzle/`) and back up in 7c. Every upstream
+> migration so far has been idempotent (`IF NOT EXISTS` / `DO $$ … WHEN duplicate_object`); if one
+> ever isn't, that is a stop-and-think moment.
+
+**7a — merge and push** (do this *after* step 5's sweep, which must run while `my-main` is still
+the pre-merge ref):
 
 ```bash
 git checkout my-main && git merge --no-ff update/$NEW && git push origin my-main
 ```
 
-Apply upstream's new Drizzle migrations **manually, reviewed, backed up** — never let a deploy run
-them. Then:
+**7b — tag the OUTGOING images as the rollback, before building over them.** `deploy.sh` reuses
+the `heatmap` tag, so the previous release becomes dangling the moment you build. Tag it *first* —
+hunting dangling IDs afterwards is guesswork, and a stray `docker image prune` destroys them.
 
 ```bash
-./deploy.sh                                   # builds OUR source. never update.sh
-git tag -a deployed/$NEW -m "known-good, deployed" && git push origin deployed/$NEW
-# preserve the outgoing images as the rollback (deploy.sh reuses the `heatmap` tag):
-docker images -f dangling=true
-docker tag <backend-id> ghcr.io/rybbit-io/rybbit-backend:pre-${NEW//./}
-docker tag <client-id>  ghcr.io/rybbit-io/rybbit-client:pre-${NEW//./}
+ssh faridul 'docker images --format "{{.Repository}}:{{.Tag}} {{.ID}}" | grep -E "rybbit-(backend|client):heatmap"'
+ssh faridul 'docker tag <backend-id> ghcr.io/rybbit-io/rybbit-backend:pre-v280
+             docker tag <client-id>  ghcr.io/rybbit-io/rybbit-client:pre-v280'
 ```
 
-Finally, update `CUSTOMIZATIONS.md` with any new conflict point this release created.
+**7c — back up Postgres** (migrations run on the next backend start):
+
+```bash
+ssh faridul 'mkdir -p /home/faridul/backups && cd /home/faridul/rybbit && docker compose exec -T postgres \
+  pg_dump -U frog -d analytics --clean --if-exists | gzip \
+  > /home/faridul/backups/analytics-pre-vXYZ-$(date +%Y%m%d-%H%M%S).sql.gz'
+```
+
+**7d — deploy** (builds OUR source on the server; never `update.sh`):
+
+```bash
+./deploy.sh
+```
+
+**7e — verify** (see step 8) **then** set the anchor:
+
+```bash
+git tag -a deployed/$NEW -m "known-good, deployed" && git push origin deployed/$NEW
+```
+
+**7f — reclaim build cache** (safe; a deploy leaves several GB). **Never `docker image prune`**
+(kills the `pre-v*` rollbacks) and **never prune volumes** (that is Postgres + ClickHouse data):
+
+```bash
+ssh faridul 'docker builder prune -af && df -h / | tail -1'
+```
+
+Finally, update `CUSTOMIZATIONS.md` with any new conflict point, and bump the anchor + image tag
+references in `FORK_MAINTENANCE.md`.
+
+### What a deploy does NOT do
+`deploy.sh` rsyncs to `rybbit-hm-build/`, builds there, and only rewrites the live stack's
+`docker-compose.override.yml`. It **never replaces `STACK_DIR/docker-compose.yml`**, so upstream's
+image bumps for **clickhouse / postgres / redis are not applied** (v2.8.0 proposed ClickHouse
+25.4.2 → 26.3.17.4 and Redis 7 → 8.6.4; the v2.8.0 backend runs fine against the older ones).
+That is deliberate — a ClickHouse major upgrade over 1M+ rows is its own operation with its own
+backup, not a side effect of shipping code.
+
+---
+
+## 8. Post-deploy verification — run the script, don't eyeball it
+
+```bash
+./verify-deploy.sh
+```
+
+26 checks: public endpoints, container health, migration errors + applied count, **our** heatmap
+columns, **our** ClickHouse tables and row counts, **every** custom route (a `404` means a route
+was lost in the merge — `403`/`401` is correct when unauthenticated), the three tracking-script
+customizations in the served bundle, live ingestion, and rollback images. Exits non-zero on
+failure and prints the rollback command.
+
+**A green health check is not verification.** `deploy.sh`'s own check only proves the client
+returns 200 — it cannot tell you a heatmap route vanished or the tracking script lost our
+delay-JS fallbacks. Step 8's last two groups are the ones that matter: *are our customizations
+actually in the shipped artifact*, and *is real traffic flowing through the new build*.
+
+Still browser-only (do these by hand once): login, a dashboard rendering real data, **Heatmaps**
+Click tab pills + overlay opacity, **Goals** converted sessions showing name/email, **Mailbo**
+settings tab.
+
+### Rollback
+```bash
+ssh faridul 'cd /home/faridul/rybbit && sed -i "s/:heatmap/:pre-v280/" docker-compose.override.yml \
+  && docker compose up -d --no-deps backend client'
+```
+Postgres restore (only if a migration actually broke something):
+`zcat <backup>.sql.gz | docker compose exec -T postgres psql -U frog -d analytics`
 
 ---
 
 ## Post-merge checklist
 
+Merge:
 - [ ] no conflict markers; no unmerged paths
 - [ ] `shared` → `server` → `client` all build; `tsc` clean both sides
-- [ ] `./verify-fork-intact.sh $OLD my-main` — every CHECK explained in writing
+- [ ] `./verify-fork-intact.sh $OLD my-main` **on the `update/` branch** — every CHECK explained in writing
 - [ ] messages purely additive vs upstream (0 removals); build churn discarded
 - [ ] drizzle: our migration renumbered, `IF NOT EXISTS` re-added, journal tag fixed
 - [ ] tests: failures reproduced on a pristine worktree or fixed
 - [ ] new upstream `IS_CLOUD` gates reviewed:
       `git diff $OLD..$NEW -- client/src | grep '^+.*IS_CLOUD'`
 - [ ] `CUSTOMIZATIONS.md` updated
-- [ ] smoke test passed → merge to `my-main`, deploy, tag `deployed/$NEW`, tag old images
+
+Ship (order matters):
+- [ ] 7a merge `--no-ff` into `my-main` + push
+- [ ] 7b tag outgoing images `:pre-vXYZ` **before** building over them
+- [ ] 7c `pg_dump` backup **before** deploy (the deploy runs migrations)
+- [ ] 7d `./deploy.sh`
+- [ ] 8  `./verify-deploy.sh` → all green
+- [ ] 7e tag + push `deployed/$NEW`; bump the anchor and image tags in `FORK_MAINTENANCE.md`
+- [ ] 7f `docker builder prune -af` only — never `image prune`, never volumes
+- [ ] browser pass: login, dashboard, Heatmaps Click tab, Goals traits, Mailbo tab
