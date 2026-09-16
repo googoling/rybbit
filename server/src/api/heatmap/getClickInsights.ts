@@ -2,7 +2,8 @@ import { FilterParams } from "@rybbit/shared";
 import { FastifyReply, FastifyRequest } from "fastify";
 import { clickhouse } from "../../db/clickhouse/clickhouse.js";
 import { getFilterStatement } from "../analytics/utils/getFilterStatement.js";
-import { getTimeStatement, processResults } from "../analytics/utils/utils.js";
+import { processResults } from "../analytics/utils/utils.js";
+import { getTimeStatement } from "../analytics/utils/timeWindow.js";
 import { getGoalSessionFilter } from "./goalSessionFilter.js";
 
 type Point = { x_percent: number; y_absolute: number; count: number };

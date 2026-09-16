@@ -6,6 +6,7 @@ import { db } from "../../db/postgres/postgres.js";
 import { sites } from "../../db/postgres/schema.js";
 import { IS_CLOUD } from "../../lib/const.js";
 import { validateIPPattern } from "../../lib/ipUtils.js";
+import { detectPlatform } from "../lifecycleEmails/platformDetect.js";
 import { siteConfig, type SiteConfigData } from "../../lib/siteConfig.js";
 
 type SiteRow = typeof sites.$inferSelect;
@@ -277,6 +278,18 @@ class SiteConfigurationLifecycle {
         throw new Error("Site insert returned no row");
       }
 
+      // Fingerprint the site's platform in the background so the lifecycle
+      // install email can link the right guide. Best-effort only.
+      if (siteType === "web") {
+        void detectPlatform(domain)
+          .then(platform =>
+            platform
+              ? db.update(sites).set({ detectedPlatform: platform.key }).where(eq(sites.siteId, createdSite.siteId))
+              : undefined
+          )
+          .catch(() => {});
+      }
+
       return createdSite;
     } catch (error) {
       if (isUniqueConstraintViolation(error)) {
@@ -379,7 +392,7 @@ class SiteConfigurationLifecycle {
         query_params: { id: siteId },
       }),
       clickhouse.command({
-        query: "DELETE FROM session_replay_metadata WHERE site_id = {id:UInt32}",
+        query: "DELETE FROM session_replay_metadata_v2 WHERE site_id = {id:UInt32}",
         query_params: { id: siteId },
       }),
     ]);

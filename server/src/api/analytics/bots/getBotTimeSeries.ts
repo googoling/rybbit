@@ -1,14 +1,22 @@
 import { FilterParams } from "@rybbit/shared";
 import { FastifyReply, FastifyRequest } from "fastify";
-import SqlString from "sqlstring";
 import { TimeBucket } from "../types.js";
-import { getTimeStatement, TimeBucketToFn } from "../utils/utils.js";
+import { resolveTimeWindow } from "../utils/timeWindow.js";
 import { analyticsRoute, runAnalyticsQuery } from "../utils/analyticsQuery.js";
-import { type BotLayerKey, getBotFilterStatement, getBotLayerStatement, getBotTimeStatementFill } from "./utils.js";
+import {
+  AI_CRAWLER_PURPOSE_SQL_LIST,
+  AI_PURPOSE_SQL_LIST,
+  type BotLayerKey,
+  getBotFilterStatement,
+  getBotLayerStatement,
+  getBotPurposeStatement,
+} from "./utils.js";
 
 type BotTimeSeriesPoint = {
   time: string;
   bot_requests: number;
+  ai_agent_requests: number;
+  ai_crawler_requests: number;
 };
 
 export interface BotTimeSeriesRequest {
@@ -18,29 +26,33 @@ export interface BotTimeSeriesRequest {
   Querystring: FilterParams<{
     bucket: TimeBucket;
     layer?: BotLayerKey;
+    /** A single purpose, or "ai" / "ai_crawler" for the grouped families. */
+    purpose?: string;
   }>;
 }
 
 export const buildBotTimeSeriesQuery = (query: BotTimeSeriesRequest["Querystring"]) => {
-  const { bucket = "hour", time_zone } = query;
-  const timeStatement = getTimeStatement(query);
+  const { bucket = "hour" } = query;
+  const window = resolveTimeWindow(query);
+  const timeStatement = window.where();
   const filterStatement = getBotFilterStatement(query.filters);
   const layerStatement = getBotLayerStatement(query.layer);
-  const hasBoundedTime =
-    Boolean(query.start_date && query.end_date) ||
-    Boolean(query.start_datetime && query.end_datetime) ||
-    (query.past_minutes_start !== undefined && query.past_minutes_end !== undefined);
-  const fillClause = hasBoundedTime ? getBotTimeStatementFill(query, bucket) : "";
-  const timezone = SqlString.escape(time_zone || "UTC");
+  const purposeStatement = getBotPurposeStatement(query.purpose);
+  const fillClause = window.fill(bucket);
 
   return `
     SELECT
-      toDateTime(${TimeBucketToFn[bucket]}(toTimeZone(timestamp, ${timezone}))) AS time,
-      count() AS bot_requests
+      ${window.bucketed("timestamp", bucket)} AS time,
+      count() AS bot_requests,
+      -- Returned on every bucket so the chart can draw agents against crawlers
+      -- without a second round trip; both read 0 on windows predating identity.
+      countIf(bot_purpose = 'ai_agent') AS ai_agent_requests,
+      countIf(bot_purpose IN (${AI_CRAWLER_PURPOSE_SQL_LIST})) AS ai_crawler_requests
     FROM bot_events
     WHERE site_id = {siteId:Int32}
       ${filterStatement}
       ${layerStatement}
+      ${purposeStatement}
       ${timeStatement}
     GROUP BY time
     ORDER BY time ${fillClause}

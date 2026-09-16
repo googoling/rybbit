@@ -5,19 +5,13 @@ vi.mock("../../../db/postgres/postgres.js", () => ({
   sql: {},
 }));
 
-import { TimeBucket } from "../types.js";
 import {
   buildStringFilterCondition,
   getBotFilterStatement,
   getBotLayerStatement,
+  getBotPurposeStatement,
   getBotSqlParam,
-  getBotTimeStatementFill,
 } from "./utils.js";
-
-const normalize = (sql: string) => sql.replace(/\s+/g, " ").trim();
-
-type FillParams = Parameters<typeof getBotTimeStatementFill>[0];
-const fillParams = (p: Record<string, unknown>) => p as unknown as FillParams;
 
 describe("getBotLayerStatement", () => {
   it("should return empty string for undefined layer", () => {
@@ -295,86 +289,33 @@ describe("getBotFilterStatement", () => {
   });
 });
 
-describe("getBotTimeStatementFill", () => {
-  describe("date range mode", () => {
-    it("should build a timezone-aware WITH FILL clause from start_date and end_date", () => {
-      const result = getBotTimeStatementFill(
-        fillParams({ start_date: "2024-01-01", end_date: "2024-01-31", time_zone: "America/New_York" }),
-        "day"
-      );
-      expect(normalize(result)).toBe(
-        "WITH FILL FROM toTimeZone( toDateTime(toStartOfDay(toDateTime('2024-01-01', 'America/New_York'))), 'UTC' ) " +
-          "TO if( toDate('2024-01-31') = toDate(now(), 'America/New_York'), toTimeZone(now(), 'UTC'), " +
-          "toTimeZone( toDateTime(toStartOfDay(toDateTime('2024-01-31', 'America/New_York'))) + INTERVAL 1 DAY, 'UTC' ) ) " +
-          "STEP INTERVAL 1 DAY"
-      );
-    });
 
-    it("should default a missing time_zone to UTC", () => {
-      const result = getBotTimeStatementFill(fillParams({ start_date: "2024-01-01", end_date: "2024-01-31" }), "day");
-      expect(result).toContain("toDateTime('2024-01-01', 'UTC')");
-    });
+describe("getBotPurposeStatement", () => {
+  it("returns nothing when no purpose is selected", () => {
+    expect(getBotPurposeStatement()).toBe("");
+    expect(getBotPurposeStatement(null)).toBe("");
+    expect(getBotPurposeStatement("")).toBe("");
   });
 
-  describe("datetime range mode", () => {
-    it("should build a WITH FILL clause from start_datetime and end_datetime", () => {
-      const result = getBotTimeStatementFill(
-        fillParams({
-          start_datetime: "2024-01-01 05:30:00",
-          end_datetime: "2024-01-02 06:45:00",
-          time_zone: "UTC",
-        }),
-        "hour"
-      );
-      expect(normalize(result)).toBe(
-        "WITH FILL FROM toTimeZone( toDateTime(toStartOfHour(toTimeZone(toDateTime('2024-01-01 05:30:00', 'UTC'), 'UTC'))), 'UTC' ) " +
-          "TO toTimeZone( toDateTime(toStartOfHour(toTimeZone(toDateTime('2024-01-02 06:45:00', 'UTC'), 'UTC'))), 'UTC' ) " +
-          "STEP INTERVAL 1 HOUR"
-      );
-    });
+  it("expands the ai family to all three AI purposes", () => {
+    expect(getBotPurposeStatement("ai")).toBe("AND bot_purpose IN ('ai_training', 'ai_search', 'ai_agent')");
   });
 
-  describe("past minutes mode", () => {
-    beforeEach(() => {
-      vi.useFakeTimers();
-      vi.setSystemTime(new Date("2024-06-15T12:00:00Z"));
-    });
-
-    afterEach(() => {
-      vi.useRealTimers();
-    });
-
-    it("should build a WITH FILL clause from past_minutes_start/end relative to now", () => {
-      const result = getBotTimeStatementFill(fillParams({ past_minutes_start: 120, past_minutes_end: 60 }), "hour");
-      expect(normalize(result)).toBe(
-        "WITH FILL FROM toStartOfHour(toDateTime('2024-06-15 10:00:00')) " +
-          "TO toStartOfHour(toDateTime('2024-06-15 11:00:00')) + INTERVAL 1 HOUR " +
-          "STEP INTERVAL 1 HOUR"
-      );
-    });
-
-    it("should use MINUTE-based interval for minute buckets", () => {
-      const result = getBotTimeStatementFill(
-        fillParams({ past_minutes_start: 30, past_minutes_end: 0 }),
-        "five_minutes"
-      );
-      expect(result).toContain("+ INTERVAL 1 MINUTE");
-      expect(result).toContain("STEP INTERVAL 5 MINUTES");
-    });
+  it("expands ai_crawler to the two non-agent AI purposes", () => {
+    // Agents are a person's fetch, not background crawling — the whole point of
+    // the split is that they do not belong in a crawler total.
+    expect(getBotPurposeStatement("ai_crawler")).toBe("AND bot_purpose IN ('ai_training', 'ai_search')");
   });
 
-  describe("validation", () => {
-    it("should throw for an invalid bucket", () => {
-      expect(() =>
-        getBotTimeStatementFill(
-          fillParams({ start_date: "2024-01-01", end_date: "2024-01-31", time_zone: "UTC" }),
-          "decade" as TimeBucket
-        )
-      ).toThrow();
-    });
+  it("matches a single known purpose", () => {
+    expect(getBotPurposeStatement("ai_agent")).toBe("AND bot_purpose = 'ai_agent'");
+    expect(getBotPurposeStatement("seo")).toBe("AND bot_purpose = 'seo'");
+  });
 
-    it("should throw when no time range params are provided", () => {
-      expect(() => getBotTimeStatementFill(fillParams({}), "day")).toThrow();
-    });
+  it("ignores an unknown purpose rather than interpolating it", () => {
+    // The value reaches SQL by interpolation, so anything not on the allowlist
+    // must produce no clause at all.
+    expect(getBotPurposeStatement("'; DROP TABLE bot_events; --")).toBe("");
+    expect(getBotPurposeStatement("nonsense")).toBe("");
   });
 });

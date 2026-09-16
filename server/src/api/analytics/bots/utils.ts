@@ -1,9 +1,5 @@
-import { FilterParams } from "@rybbit/shared";
-import SqlString from "sqlstring";
-import { FilterParameter, TimeBucket } from "../types.js";
+import { FilterParameter } from "../types.js";
 import { getFilterStatement, getSqlParam } from "../utils/getFilterStatement.js";
-import { validateTimeStatementFillParams } from "../utils/query-validation.js";
-import { bucketIntervalMap, normalizeDatetimeForClickhouse, TimeBucketToFn } from "../utils/utils.js";
 
 // Condition rendering is shared with the events surface; re-exported here for
 // existing importers and tests.
@@ -18,7 +14,15 @@ export const BOT_LAYER_COLUMNS = {
 } as const;
 
 export type BotLayerKey = keyof typeof BOT_LAYER_COLUMNS;
-export type BotDimensionKey = FilterParameter | "asn_org" | "bot_category" | "matched_ua_pattern";
+export type BotDimensionKey =
+  | FilterParameter
+  | "asn_org"
+  | "asn_provider"
+  | "bot_category"
+  | "bot_name"
+  | "bot_operator"
+  | "bot_purpose"
+  | "matched_ua_pattern";
 
 const BOT_FILTER_PARAMETERS = new Set<FilterParameter>([
   "browser",
@@ -53,9 +57,57 @@ export const BOT_DIMENSIONS = new Set<BotDimensionKey>([
   "pathname",
   "dimensions",
   "asn_org",
+  "asn_provider",
   "bot_category",
+  "bot_name",
+  "bot_operator",
+  "bot_purpose",
   "matched_ua_pattern",
 ]);
+
+/**
+ * Purposes that count as AI traffic. Grouped rather than enumerated at every
+ * call site so "AI" means one thing across the overview, the chart and every
+ * breakdown on the page.
+ */
+export const AI_BOT_PURPOSES = ["ai_training", "ai_search", "ai_agent"] as const;
+export const AI_CRAWLER_PURPOSES = ["ai_training", "ai_search"] as const;
+
+const quoteList = (values: readonly string[]) => values.map(value => `'${value}'`).join(", ");
+
+export const AI_PURPOSE_SQL_LIST = quoteList(AI_BOT_PURPOSES);
+export const AI_CRAWLER_PURPOSE_SQL_LIST = quoteList(AI_CRAWLER_PURPOSES);
+
+const BOT_PURPOSES = new Set<string>([
+  ...AI_BOT_PURPOSES,
+  "search",
+  "social_preview",
+  "seo",
+  "monitoring",
+  "security",
+  "scripted",
+  "headless",
+]);
+
+/**
+ * Narrows a bot query to one purpose, or to the whole AI family with `"ai"`.
+ *
+ * Purpose is not a filter parameter — it exists only on the bot tables and has
+ * no equivalent on the events surface — so it takes the same dedicated-clause
+ * route `layer` does rather than going through the filter allowlist.
+ */
+export function getBotPurposeStatement(purpose?: string | null) {
+  if (!purpose) {
+    return "";
+  }
+  if (purpose === "ai") {
+    return `AND bot_purpose IN (${AI_PURPOSE_SQL_LIST})`;
+  }
+  if (purpose === "ai_crawler") {
+    return `AND bot_purpose IN (${AI_CRAWLER_PURPOSE_SQL_LIST})`;
+  }
+  return BOT_PURPOSES.has(purpose) ? `AND bot_purpose = '${purpose}'` : "";
+}
 
 export function getBotLayerStatement(layer?: string | null) {
   if (!layer) {
@@ -68,7 +120,15 @@ export function getBotLayerStatement(layer?: string | null) {
 
 // Dimension keys that only exist on bot_events; everything else shares the
 // events-surface column expressions from getSqlParam.
-const BOT_ONLY_DIMENSIONS = new Set<BotDimensionKey>(["asn_org", "bot_category", "matched_ua_pattern"]);
+const BOT_ONLY_DIMENSIONS = new Set<BotDimensionKey>([
+  "asn_org",
+  "asn_provider",
+  "bot_category",
+  "bot_name",
+  "bot_operator",
+  "bot_purpose",
+  "matched_ua_pattern",
+]);
 
 export const getBotSqlParam = (parameter: BotDimensionKey) => {
   if (BOT_ONLY_DIMENSIONS.has(parameter)) {
@@ -87,68 +147,3 @@ export function getBotFilterStatement(filters?: string) {
   });
 }
 
-export function getBotTimeStatementFill(params: FilterParams, bucket: TimeBucket) {
-  const { params: validatedParams, bucket: validatedBucket } = validateTimeStatementFillParams(params, bucket);
-
-  if (validatedParams.start_date && validatedParams.end_date && validatedParams.time_zone) {
-    const { start_date, end_date, time_zone } = validatedParams;
-    return `WITH FILL FROM toTimeZone(
-      toDateTime(${TimeBucketToFn[validatedBucket]}(toDateTime(${SqlString.escape(start_date)}, ${SqlString.escape(
-        time_zone
-      )}))),
-      'UTC'
-      )
-      TO if(
-        toDate(${SqlString.escape(end_date)}) = toDate(now(), ${SqlString.escape(time_zone)}),
-        toTimeZone(now(), 'UTC'),
-        toTimeZone(
-          toDateTime(${TimeBucketToFn[validatedBucket]}(toDateTime(${SqlString.escape(end_date)}, ${SqlString.escape(
-            time_zone
-          )}))) + INTERVAL 1 DAY,
-          'UTC'
-        )
-      ) STEP INTERVAL ${bucketIntervalMap[validatedBucket]}`;
-  }
-
-  if (validatedParams.start_datetime && validatedParams.end_datetime && validatedParams.time_zone) {
-    const { start_datetime, end_datetime, time_zone } = validatedParams;
-    const normalizedStartDatetime = normalizeDatetimeForClickhouse(start_datetime);
-    const normalizedEndDatetime = normalizeDatetimeForClickhouse(end_datetime);
-    return `WITH FILL FROM toTimeZone(
-      toDateTime(${TimeBucketToFn[validatedBucket]}(toTimeZone(toDateTime(${SqlString.escape(
-        normalizedStartDatetime
-      )}, 'UTC'), ${SqlString.escape(time_zone)}))),
-      'UTC'
-      )
-      TO toTimeZone(
-        toDateTime(${TimeBucketToFn[validatedBucket]}(toTimeZone(toDateTime(${SqlString.escape(
-          normalizedEndDatetime
-        )}, 'UTC'), ${SqlString.escape(time_zone)}))),
-        'UTC'
-      ) STEP INTERVAL ${bucketIntervalMap[validatedBucket]}`;
-  }
-
-  if (validatedParams.past_minutes_start !== undefined && validatedParams.past_minutes_end !== undefined) {
-    const { past_minutes_start: start, past_minutes_end: end } = validatedParams;
-    const now = new Date();
-    const startIso = new Date(now.getTime() - start * 60 * 1000).toISOString().slice(0, 19).replace("T", " ");
-    const endIso = new Date(now.getTime() - end * 60 * 1000).toISOString().slice(0, 19).replace("T", " ");
-
-    return `WITH FILL
-      FROM ${TimeBucketToFn[validatedBucket]}(toDateTime(${SqlString.escape(startIso)}))
-      TO ${TimeBucketToFn[validatedBucket]}(toDateTime(${SqlString.escape(endIso)})) + INTERVAL 1 ${
-        validatedBucket === "month"
-          ? "MONTH"
-          : validatedBucket === "week"
-            ? "WEEK"
-            : validatedBucket === "day"
-              ? "DAY"
-              : validatedBucket === "hour"
-                ? "HOUR"
-                : "MINUTE"
-      }
-      STEP INTERVAL ${bucketIntervalMap[validatedBucket]}`;
-  }
-
-  return "";
-}

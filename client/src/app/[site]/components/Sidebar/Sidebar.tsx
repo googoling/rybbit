@@ -28,13 +28,12 @@ import { Suspense } from "react";
 import { useGetSite } from "../../../../api/admin/hooks/useSites";
 import { Sidebar as SidebarComponents } from "../../../../components/sidebar/Sidebar";
 import { SiteSettings } from "../../../../components/SiteSettings/SiteSettings";
-import { DEMO_HOSTNAME } from "../../../../lib/const";
+import { useAppEnv } from "../../../../hooks/useIsProduction";
 import { featureEnabled } from "../../../../lib/featureOverrides";
 import { getSiteRouteContext } from "../../../../lib/siteRoute";
+import { useStripeSubscription } from "../../../../lib/subscription/useStripeSubscription";
 import { useEmbedPageOptions } from "../../utils";
 import { SiteSelector } from "./SiteSelector";
-import { useStripeSubscription } from "../../../../lib/subscription/useStripeSubscription";
-import { useAppEnv } from "../../../../hooks/useIsProduction";
 
 function SidebarContent() {
   const t = useExtracted();
@@ -76,7 +75,7 @@ function SidebarContent() {
       <div className="flex flex-col p-3 border-b border-neutral-200 dark:border-neutral-800">
         <SiteSelector />
       </div>
-      <div className="flex flex-col p-3 pt-1">
+      <div className="flex min-h-0 flex-1 flex-col overflow-y-auto p-3 pt-1">
         <SidebarComponents.SectionHeader>
           {isMobileSite ? t("App Analytics") : t("Web Analytics")}
         </SidebarComponents.SectionHeader>

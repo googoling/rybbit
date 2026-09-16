@@ -1,6 +1,6 @@
 import { useQuery } from "@tanstack/react-query";
 import { buildApiParams } from "@/api/utils";
-import { useStore } from "@/lib/store";
+import { useStore, useTimezone } from "@/lib/store";
 import {
   fetchAttentionMap,
   fetchClickHeatmap,
@@ -26,7 +26,8 @@ interface ViewArgs {
 
 export function useGetHeatmapPages(device?: string) {
   const { time, site, filters } = useStore();
-  const params = buildApiParams(time, { filters });
+  const timeZone = useTimezone();
+  const params = buildApiParams(time, { timeZone, filters });
   return useQuery({
     queryKey: ["heatmap-pages", site, time, filters, device],
     queryFn: () => fetchHeatmapPages(site, { ...params, device }),
@@ -37,7 +38,8 @@ export function useGetHeatmapPages(device?: string) {
 
 export function useGetClickHeatmap({ hostname, pathname, device, goalId, segment, mode, enabled = true }: ViewArgs) {
   const { time, site, filters } = useStore();
-  const params = buildApiParams(time, { filters });
+  const timeZone = useTimezone();
+  const params = buildApiParams(time, { timeZone, filters });
   return useQuery({
     queryKey: ["heatmap-clicks", site, time, filters, hostname, pathname, device, goalId, segment, mode],
     queryFn: () => fetchClickHeatmap(site, { ...params, hostname, pathname, device, goalId, segment, mode }),
@@ -48,7 +50,8 @@ export function useGetClickHeatmap({ hostname, pathname, device, goalId, segment
 
 export function useGetAttentionMap({ hostname, pathname, device, goalId, segment, enabled = true }: ViewArgs) {
   const { time, site, filters } = useStore();
-  const params = buildApiParams(time, { filters });
+  const timeZone = useTimezone();
+  const params = buildApiParams(time, { timeZone, filters });
   return useQuery({
     queryKey: ["heatmap-attention", site, time, filters, hostname, pathname, device, goalId, segment],
     queryFn: () => fetchAttentionMap(site, { ...params, hostname, pathname, device, goalId, segment }),
@@ -59,7 +62,8 @@ export function useGetAttentionMap({ hostname, pathname, device, goalId, segment
 
 export function useGetScrollMap({ hostname, pathname, device, goalId, segment, enabled = true }: ViewArgs) {
   const { time, site, filters } = useStore();
-  const params = buildApiParams(time, { filters });
+  const timeZone = useTimezone();
+  const params = buildApiParams(time, { timeZone, filters });
   return useQuery({
     queryKey: ["heatmap-scroll", site, time, filters, hostname, pathname, device, goalId, segment],
     queryFn: () => fetchScrollMap(site, { ...params, hostname, pathname, device, goalId, segment }),
@@ -70,7 +74,8 @@ export function useGetScrollMap({ hostname, pathname, device, goalId, segment, e
 
 export function useGetRankedElements({ hostname, pathname, device, goalId, segment, mode, enabled = true }: ViewArgs) {
   const { time, site, filters } = useStore();
-  const params = buildApiParams(time, { filters });
+  const timeZone = useTimezone();
+  const params = buildApiParams(time, { timeZone, filters });
   return useQuery({
     queryKey: ["heatmap-elements", site, time, filters, hostname, pathname, device, goalId, segment, mode],
     queryFn: () => fetchRankedElements(site, { ...params, hostname, pathname, device, goalId, segment, mode }),
@@ -81,7 +86,8 @@ export function useGetRankedElements({ hostname, pathname, device, goalId, segme
 
 export function useGetClickInsights({ hostname, pathname, device, goalId, segment, enabled = true }: ViewArgs) {
   const { time, site, filters } = useStore();
-  const params = buildApiParams(time, { filters });
+  const timeZone = useTimezone();
+  const params = buildApiParams(time, { timeZone, filters });
   return useQuery({
     queryKey: ["heatmap-insights", site, time, filters, hostname, pathname, device, goalId, segment],
     queryFn: () => fetchClickInsights(site, { ...params, hostname, pathname, device, goalId, segment }),

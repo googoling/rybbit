@@ -66,6 +66,36 @@ const filterTypeToOperator = (type: FilterType) => {
 // value remain functional.
 const escapeLikePattern = (value: string): string => value.replace(/[\\%_]/g, "\\$&");
 
+export const MAX_REGEX_PATTERN_LENGTH = 500;
+
+// RE2 (what ClickHouse's match() runs) has no lookaround or backreferences;
+// JavaScript accepts them, so a JS-only check would let a pattern through
+// that fails at query time.
+const RE2_UNSUPPORTED = /\(\?<?[=!]|\\[1-9]/;
+
+/**
+ * Why a regex filter pattern cannot run, or null when it can. Shared by the
+ * query path and by stored segments so a saved pattern is held to exactly the
+ * constraints it will be executed under.
+ */
+export function validateRegexPattern(pattern: string): string | null {
+  if (!pattern) {
+    return "Regex pattern cannot be empty";
+  }
+  if (pattern.length > MAX_REGEX_PATTERN_LENGTH) {
+    return `Regex pattern too long (max ${MAX_REGEX_PATTERN_LENGTH} characters)`;
+  }
+  try {
+    new RegExp(pattern);
+  } catch (e) {
+    return `Invalid regex pattern: ${e instanceof Error ? e.message : "Unknown error"}`;
+  }
+  if (RE2_UNSUPPORTED.test(pattern)) {
+    return "Regex pattern uses lookaround or backreferences, which are not supported";
+  }
+  return null;
+}
+
 export const wrapLikeValue = (type: FilterType, value: string | number): string => {
   const v = String(value);
   if (type === "contains" || type === "not_contains") return `%${escapeLikePattern(v)}%`;
@@ -94,18 +124,9 @@ export const buildStringFilterCondition = (
   if (filterType === "regex" || filterType === "not_regex") {
     const pattern = String(values[0] ?? "");
 
-    if (!pattern) {
-      throw new Error("Regex pattern cannot be empty");
-    }
-
-    try {
-      new RegExp(pattern);
-    } catch (e) {
-      throw new Error(`Invalid regex pattern: ${e instanceof Error ? e.message : "Unknown error"}`);
-    }
-
-    if (pattern.length > 500) {
-      throw new Error("Regex pattern too long (max 500 characters)");
+    const regexError = validateRegexPattern(pattern);
+    if (regexError) {
+      throw new Error(regexError);
     }
 
     const matchExpr = `match(${expression}, ${SqlString.escape(pattern)})`;
@@ -150,10 +171,10 @@ export const getSqlParam = (parameter: FilterParameter) => {
     return "domainWithoutWWW(referrer)";
   }
   if (parameter === "entry_page") {
-    return "(SELECT argMin(pathname, timestamp) FROM events WHERE session_id = events.session_id)";
+    return "(SELECT argMinIf(pathname, timestamp_ms, type = 'pageview') FROM events WHERE session_id = events.session_id)";
   }
   if (parameter === "exit_page") {
-    return "(SELECT argMax(pathname, timestamp) FROM events WHERE session_id = events.session_id)";
+    return "(SELECT argMaxIf(pathname, timestamp_ms, type = 'pageview') FROM events WHERE session_id = events.session_id)";
   }
   if (parameter === "dimensions") {
     return "concat(toString(screen_width), 'x', toString(screen_height))";
@@ -214,11 +235,19 @@ export function getFilterStatement(
     // inside the subquery. fieldMappings deliberately do NOT apply here: the
     // subquery selects from the raw events table, where the caller's CTE
     // aliases don't exist.
-    const condition = buildStringFilterCondition(getSqlParam(param), filterType, values);
+    const negatedSessionFilterTypes: Partial<Record<FilterType, FilterType>> = {
+      not_equals: "equals",
+      not_contains: "contains",
+      not_regex: "regex",
+      is_null: "is_not_null",
+    };
+    const positiveFilterType = negatedSessionFilterTypes[filterType] ?? filterType;
+    const condition = buildStringFilterCondition(getSqlParam(param), positiveFilterType, values);
+    const membershipOperator = negatedSessionFilterTypes[filterType] ? "NOT IN" : "IN";
 
     const finalWhere = whereClause ? `WHERE ${whereClause} AND ${condition}` : `WHERE ${condition}`;
 
-    return `session_id IN (
+    return `session_id ${membershipOperator} (
             SELECT DISTINCT session_id
             FROM events
             ${finalWhere}
@@ -262,7 +291,7 @@ export function getFilterStatement(
         }
 
         if (filter.parameter === "entry_page") {
-          const whereClause = [siteIdFilter, timeFilter].filter(Boolean).join(" AND ");
+          const whereClause = [siteIdFilter, timeFilter, "type = 'pageview'"].filter(Boolean).join(" AND ");
           const whereStatement = whereClause ? `WHERE ${whereClause}` : "";
           const condition = buildStringFilterCondition("entry_pathname", filter.type, filter.value);
 
@@ -271,7 +300,7 @@ export function getFilterStatement(
             FROM (
               SELECT
                 session_id,
-                argMin(pathname, timestamp) AS entry_pathname
+                argMin(pathname, timestamp_ms) AS entry_pathname
               FROM events
               ${whereStatement}
               GROUP BY session_id
@@ -281,7 +310,7 @@ export function getFilterStatement(
         }
 
         if (filter.parameter === "exit_page") {
-          const whereClause = [siteIdFilter, timeFilter].filter(Boolean).join(" AND ");
+          const whereClause = [siteIdFilter, timeFilter, "type = 'pageview'"].filter(Boolean).join(" AND ");
           const whereStatement = whereClause ? `WHERE ${whereClause}` : "";
           const condition = buildStringFilterCondition("exit_pathname", filter.type, filter.value);
 
@@ -290,7 +319,7 @@ export function getFilterStatement(
             FROM (
               SELECT
                 session_id,
-                argMax(pathname, timestamp) AS exit_pathname
+                argMax(pathname, timestamp_ms) AS exit_pathname
               FROM events
               ${whereStatement}
               GROUP BY session_id

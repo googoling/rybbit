@@ -10,7 +10,7 @@ import { useUserInfo } from "../../../../api/analytics/hooks/userGetInfo";
 import { useGetSessions, useGetUserSessionCount } from "../../../../api/analytics/hooks/useGetUserSessions";
 import { DateSelector } from "../../../../components/DateSelector/DateSelector";
 import { Button } from "../../../../components/ui/button";
-import { canGoForward, goBack, goForward, useStore } from "../../../../lib/store";
+import { canGoBack, canGoForward, goBack, goForward, useStore } from "../../../../lib/store";
 import { USER_DETAIL_PAGE_FILTERS } from "../../../../lib/filterGroups";
 import { Filters } from "../../components/SubHeader/Filters/Filters";
 import { NewFilterButton } from "../../components/SubHeader/Filters/NewFilterButton";
@@ -68,7 +68,7 @@ export default function UserPage() {
     limit: LIMIT + 1,
   });
 
-  const allSessions = sessionsData?.data || [];
+  const allSessions = sessionsData || [];
   const hasNextPage = allSessions.length > LIMIT;
   const sessions = allSessions.slice(0, LIMIT);
   const hasPrevPage = page > 1;
@@ -118,7 +118,7 @@ export default function UserPage() {
               variant="secondary"
               size="icon"
               onClick={goBack}
-              disabled={time.mode === "past-minutes"}
+              disabled={!canGoBack(time)}
               className="rounded-r-none h-8 w-8"
             >
               <ChevronLeft />
@@ -184,7 +184,7 @@ export default function UserPage() {
         <UserSidebar
           data={data}
           isLoading={isLoading}
-          sessionCount={sessionCount?.data ?? []}
+          sessionCount={sessionCount ?? []}
           isLoadingCalendar={isLoadingCalendar}
           getRegionName={getRegionName}
         />

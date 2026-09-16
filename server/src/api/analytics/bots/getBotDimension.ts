@@ -1,6 +1,6 @@
 import { FilterParams } from "@rybbit/shared";
 import { FastifyReply, FastifyRequest } from "fastify";
-import { getTimeStatement } from "../utils/utils.js";
+import { getTimeStatement } from "../utils/timeWindow.js";
 import { analyticsRoute, getPaginationStatements, runPaginatedQuery } from "../utils/analyticsQuery.js";
 import {
   BOT_DIMENSIONS,
@@ -8,6 +8,7 @@ import {
   type BotLayerKey,
   getBotFilterStatement,
   getBotLayerStatement,
+  getBotPurposeStatement,
   getBotSqlParam,
 } from "./utils.js";
 
@@ -30,6 +31,8 @@ export interface BotDimensionRequest {
   Querystring: FilterParams<{
     dimension: BotDimensionKey;
     layer?: BotLayerKey;
+    /** A single purpose, or "ai" / "ai_crawler" for the grouped families. */
+    purpose?: string;
     limit?: number;
     page?: number;
   }>;
@@ -45,6 +48,7 @@ export const buildBotDimensionQuery = (query: BotDimensionRequest["Querystring"]
   const timeStatement = getTimeStatement(query);
   const filterStatement = getBotFilterStatement(query.filters);
   const layerStatement = getBotLayerStatement(query.layer);
+  const purposeStatement = getBotPurposeStatement(query.purpose);
   const { limitStatement, offsetStatement } = getPaginationStatements(query, 100, isCountQuery);
 
   const groupedQuery = `
@@ -57,6 +61,7 @@ export const buildBotDimensionQuery = (query: BotDimensionRequest["Querystring"]
     WHERE site_id = {siteId:Int32}
       ${filterStatement}
       ${layerStatement}
+      ${purposeStatement}
       ${timeStatement}
     GROUP BY value
   `;
