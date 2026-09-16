@@ -292,6 +292,11 @@ Merge:
 - [ ] tests: failures reproduced on a pristine worktree or fixed
 - [ ] new upstream `IS_CLOUD` gates reviewed:
       `git diff $OLD..$NEW -- client/src | grep '^+.*IS_CLOUD'`
+- [ ] new/changed Mapbox call sites reviewed — `MAPBOX_TOKEN` is a **MapTiler** key on this fork,
+      not a real Mapbox token (see `CUSTOMIZATIONS.md`); any `mapbox://` style URI or direct
+      `api.mapbox.com` call (style, geocoding, or otherwise) upstream adds or touches must be
+      routed through `client/src/lib/mapStyles.ts` instead, or it silently breaks:
+      `git diff $OLD..$NEW -- client/src | grep -E '^\+.*(mapbox://|api\.mapbox\.com)'`
 - [ ] `CUSTOMIZATIONS.md` updated
 
 Ship (order matters):
