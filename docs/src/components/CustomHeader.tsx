@@ -11,6 +11,10 @@ import Image from "next/image";
 import Link from "next/link";
 import { useState } from "react";
 
+/**
+ * Site header. Default register is the marketing pages' instrument sheet
+ * (1200px column with hairline sides, square buttons).
+ */
 export function CustomHeader() {
   const t = useExtracted();
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
@@ -49,6 +53,15 @@ export function CustomHeader() {
             className="inline-flex h-8 items-center justify-center rounded-md px-2.5 text-sm font-medium text-neutral-700 transition-colors hover:bg-neutral-100 hover:text-neutral-950 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-neutral-500 dark:text-neutral-300 dark:hover:bg-neutral-900 dark:hover:text-white"
           >
             {t("Login")}
+          </AppLink>
+          <AppLink
+            href="https://demo.rybbit.com/81"
+            target="_blank"
+            rel="noopener noreferrer"
+            onClick={() => trackAdEvent("demo", { location: "header" })}
+            className="hidden h-9 items-center justify-center rounded-full border border-neutral-300 bg-white px-4 text-sm font-medium text-neutral-900 transition-colors hover:bg-neutral-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-neutral-500 dark:border-neutral-800 dark:bg-neutral-900 dark:text-white dark:hover:bg-neutral-800"
+          >
+            {t("Live demo")}
           </AppLink>
           <AppLink
             href="https://app.rybbit.io/signup"

@@ -3,6 +3,7 @@ export { addSite } from "./addSite.js";
 export { deleteSite } from "./deleteSite.js";
 export { getSite } from "./getSite.js";
 export { getSiteHasData } from "./getSiteHasData.js";
+export { checkInstall } from "./checkInstall.js";
 export { getSiteIsPublic } from "./getSiteIsPublic.js";
 export { getSiteUsage } from "./getSiteUsage.js";
 export { getEmbedStats } from "./getEmbedStats.js";
@@ -14,9 +15,9 @@ export { updateSiteConfig } from "./updateSiteConfig.js";
 export { getTrackingConfig } from "./getTrackingConfig.js";
 export { getSitePrivateLinkConfig } from "./getSitePrivateLinkConfig.js";
 export { updateSitePrivateLinkConfig } from "./updateSitePrivateLinkConfig.js";
-export { getSiteExcludedIPs } from "./getSiteExcludedIPs.js";
-export { getSiteExcludedCountries } from "./getSiteExcludedCountries.js";
 export {
+  getSiteExcludedIPs,
+  getSiteExcludedCountries,
   getSiteExcludedPaths,
   getSiteExcludedHostnames,
   getSiteExcludedUserAgents,

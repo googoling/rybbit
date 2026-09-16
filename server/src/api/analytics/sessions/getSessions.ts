@@ -1,8 +1,17 @@
 import { FilterParams } from "@rybbit/shared";
 import { FastifyReply, FastifyRequest } from "fastify";
-import { getFilterStatement } from "../utils/getFilterStatement.js";
-import { SESSION_CHANNEL_AGG, SESSION_REFERRER_AGG } from "../utils/sessionAttribution.js";
-import { enrichWithTraits, getTimeStatement } from "../utils/utils.js";
+import {
+  SESSION_CHANNEL_AGG,
+  SESSION_REFERRER_AGG,
+  SESSION_UTM_CAMPAIGN_AGG,
+  SESSION_UTM_CONTENT_AGG,
+  SESSION_UTM_MEDIUM_AGG,
+  SESSION_UTM_SOURCE_AGG,
+  SESSION_UTM_TERM_AGG,
+} from "../utils/sessionAttribution.js";
+import { getSessionFilterStatement } from "../utils/sessionFilters.js";
+import { enrichWithTraits } from "../utils/utils.js";
+import { getTimeStatement } from "../utils/timeWindow.js";
 import { analyticsRoute, runAnalyticsQuery, QuerySpec } from "../utils/analyticsQuery.js";
 import { matchesUser } from "../utils/effectiveUserId.js";
 
@@ -59,23 +68,13 @@ export interface GetSessionsRequest {
     limit: number;
     page: number;
     user_id?: string;
-    session_id?: string
-    ;
+    session_id?: string;
     identified_only?: string;
     min_pageviews?: string;
     min_events?: string;
     min_duration?: string;
   }>;
 }
-
-// Field mappings for the CTE which extracts UTM params as separate columns
-const SESSION_FIELD_MAPPINGS = {
-  "url_parameters['utm_source']": "utm_source",
-  "url_parameters['utm_medium']": "utm_medium",
-  "url_parameters['utm_campaign']": "utm_campaign",
-  "url_parameters['utm_term']": "utm_term",
-  "url_parameters['utm_content']": "utm_content",
-};
 
 export const buildSessionsQuery = (query: GetSessionsRequest["Querystring"], siteId: number): QuerySpec => {
   const {
@@ -101,10 +100,7 @@ export const buildSessionsQuery = (query: GetSessionsRequest["Querystring"], sit
   //   containing a matching event) — required for any parameter the aggregated CTE
   //   below doesn't project, otherwise the outer WHERE hits an unknown identifier
   // - fieldMappings: CTE extracts UTM params as separate columns, so we need to map the field names
-  const filterStatement = getFilterStatement(filters, siteId, timeStatement, {
-    sessionLevelParams: ["event_name", "pathname", "page_title", "querystring", "channel"],
-    fieldMappings: SESSION_FIELD_MAPPINGS,
-  });
+  const filterStatement = getSessionFilterStatement(filters, siteId, timeStatement);
 
   const querySQL = `
   WITH AggregatedSessions AS (
@@ -126,16 +122,16 @@ export const buildSessionsQuery = (query: GetSessionsRequest["Querystring"], sit
           ${SESSION_REFERRER_AGG} AS referrer,
           ${SESSION_CHANNEL_AGG} AS channel,
           argMin(hostname, timestamp) AS hostname,
-          argMin(url_parameters, timestamp)['utm_source'] AS utm_source,
-          argMin(url_parameters, timestamp)['utm_medium'] AS utm_medium,
-          argMin(url_parameters, timestamp)['utm_campaign'] AS utm_campaign,
-          argMin(url_parameters, timestamp)['utm_term'] AS utm_term,
-          argMin(url_parameters, timestamp)['utm_content'] AS utm_content,
+          ${SESSION_UTM_SOURCE_AGG} AS utm_source,
+          ${SESSION_UTM_MEDIUM_AGG} AS utm_medium,
+          ${SESSION_UTM_CAMPAIGN_AGG} AS utm_campaign,
+          ${SESSION_UTM_TERM_AGG} AS utm_term,
+          ${SESSION_UTM_CONTENT_AGG} AS utm_content,
           MAX(timestamp) AS session_end,
           MIN(timestamp) AS session_start,
           dateDiff('second', MIN(timestamp), MAX(timestamp)) AS session_duration,
-          argMinIf(pathname, timestamp, type = 'pageview') AS entry_page,
-          argMaxIf(pathname, timestamp, type = 'pageview') AS exit_page,
+          argMinIf(pathname, timestamp_ms, type = 'pageview') AS entry_page,
+          argMaxIf(pathname, timestamp_ms, type = 'pageview') AS exit_page,
           countIf(type = 'pageview') AS pageviews,
           countIf(type = 'custom_event') AS events,
           countIf(type = 'error') AS errors,
@@ -161,7 +157,7 @@ export const buildSessionsQuery = (query: GetSessionsRequest["Querystring"], sit
   ),
   ReplaySessions AS (
       SELECT DISTINCT session_id
-      FROM session_replay_metadata
+      FROM session_replay_metadata_v2
       FINAL
       WHERE site_id = {siteId:Int32}
         AND event_count >= 2

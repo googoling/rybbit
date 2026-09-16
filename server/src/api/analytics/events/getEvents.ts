@@ -1,5 +1,6 @@
 import { FastifyReply, FastifyRequest } from "fastify";
-import { enrichWithTraits, getTimeStatement } from "../utils/utils.js";
+import { enrichWithTraits } from "../utils/utils.js";
+import { getTimeStatement } from "../utils/timeWindow.js";
 import { FilterParams } from "@rybbit/shared";
 import { getFilterStatement } from "../utils/getFilterStatement.js";
 import { analyticsRoute, QuerySpec, runAnalyticsQuery } from "../utils/analyticsQuery.js";
@@ -77,7 +78,10 @@ export const buildEventsQuery = (query: GetEventsRequest["Querystring"], siteId:
   const { since_timestamp, before_timestamp, page_size: pageSize = "50", filters } = query;
 
   const limit = parseInt(pageSize, 10);
-  const filterStatement = filters ? getFilterStatement(filters, siteId) : "";
+  // The event log filters individual rows; only channel remains session-attributed.
+  const filterStatement = filters
+    ? getFilterStatement(filters, siteId, undefined, { sessionLevelParams: ["channel"] })
+    : "";
 
   // Mode A: Poll for new events since a timestamp (Realtime polling)
   if (since_timestamp) {

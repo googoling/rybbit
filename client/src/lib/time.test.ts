@@ -3,13 +3,18 @@ import { describe, expect, it } from "vitest";
 import { Time } from "../components/DateSelector/types";
 import { getDashboardTimeForRange } from "./defaultTimeRange";
 import {
+  availableComparisonModes,
   canGoForward,
+  comparisonToUrlParams,
   deriveTimeState,
+  getAbsoluteBounds,
   getBucketForDateTimeRange,
   recalculateTimeForTimezone,
+  resolveComparison,
   shiftTimeBackward,
   shiftTimeForward,
   timeToUrlParams,
+  urlParamsToComparison,
   urlParamsToTime,
 } from "./time";
 
@@ -134,13 +139,21 @@ describe("shiftTimeBackward / shiftTimeForward", () => {
       endDate: "2024-03-08",
     });
     expect(
-      shiftTimeForward({ mode: "range", startDate: "2024-03-01", endDate: "2024-03-07" }, ZONE, dt("2024-03-20T00:00:00"))
+      shiftTimeForward(
+        { mode: "range", startDate: "2024-03-01", endDate: "2024-03-07" },
+        ZONE,
+        dt("2024-03-20T00:00:00")
+      )
     ).toEqual({ mode: "range", startDate: "2024-03-07", endDate: "2024-03-13" });
   });
 
   it("range: forward is blocked when the whole range would be in the future", () => {
     expect(
-      shiftTimeForward({ mode: "range", startDate: "2024-03-10", endDate: "2024-03-16" }, ZONE, dt("2024-03-14T00:00:00"))
+      shiftTimeForward(
+        { mode: "range", startDate: "2024-03-10", endDate: "2024-03-16" },
+        ZONE,
+        dt("2024-03-14T00:00:00")
+      )
     ).toBeNull();
   });
 
@@ -192,10 +205,34 @@ describe("shiftTimeBackward / shiftTimeForward", () => {
     ).toBeNull();
   });
 
-  it("all-time and past-minutes do not navigate", () => {
+  it("all-time does not navigate", () => {
     expect(shiftTimeBackward({ mode: "all-time" }, ZONE)).toBeNull();
     expect(shiftTimeForward({ mode: "all-time" }, ZONE)).toBeNull();
-    expect(shiftTimeBackward({ mode: "past-minutes", pastMinutesStart: 30, pastMinutesEnd: 0 }, ZONE)).toBeNull();
+  });
+
+  it("past-minutes: steps by the window length, staying relative to now", () => {
+    const live: Time = { mode: "past-minutes", pastMinutesStart: 30, pastMinutesEnd: 0 };
+    const oneBack = shiftTimeBackward(live, ZONE);
+    expect(oneBack).toEqual({ mode: "past-minutes", pastMinutesStart: 60, pastMinutesEnd: 30 });
+    expect(shiftTimeBackward(oneBack!, ZONE)).toEqual({
+      mode: "past-minutes",
+      pastMinutesStart: 90,
+      pastMinutesEnd: 60,
+    });
+    expect(shiftTimeForward(oneBack!, ZONE)).toEqual(live);
+  });
+
+  it("past-minutes: forward stops at the live window instead of the future", () => {
+    expect(shiftTimeForward({ mode: "past-minutes", pastMinutesStart: 30, pastMinutesEnd: 0 }, ZONE)).toBeNull();
+  });
+
+  it("past-minutes: forward clamps a partial step onto the live window", () => {
+    // A 6h window whose newer edge sits 2h out: the step lands on 0, not -4h.
+    expect(shiftTimeForward({ mode: "past-minutes", pastMinutesStart: 480, pastMinutesEnd: 120 }, ZONE)).toEqual({
+      mode: "past-minutes",
+      pastMinutesStart: 360,
+      pastMinutesEnd: 0,
+    });
   });
 });
 
@@ -233,9 +270,13 @@ describe("canGoForward", () => {
     expect(canGoForward({ mode: "year", year: "2025-01-01" }, ZONE, now)).toBe(false);
   });
 
-  it("all-time and past-minutes: never", () => {
+  it("all-time: never", () => {
     expect(canGoForward({ mode: "all-time" }, ZONE, now)).toBe(false);
+  });
+
+  it("past-minutes: gated by the newer edge of the window", () => {
     expect(canGoForward({ mode: "past-minutes", pastMinutesStart: 30, pastMinutesEnd: 0 }, ZONE, now)).toBe(false);
+    expect(canGoForward({ mode: "past-minutes", pastMinutesStart: 60, pastMinutesEnd: 30 }, ZONE, now)).toBe(true);
   });
 });
 
@@ -303,5 +344,182 @@ describe("URL serialization", () => {
     expect(params.day).toBeNull();
     expect(params.startDate).toBeNull();
     expect(params.past_minutes_start).toBeNull();
+  });
+});
+
+describe("getAbsoluteBounds", () => {
+  const iso = (bounds: { start: DateTime; end: DateTime } | null) =>
+    bounds && [bounds.start.toISO({ suppressMilliseconds: true }), bounds.end.toISO({ suppressMilliseconds: true })];
+
+  it("day spans midnight to midnight in the given zone", () => {
+    expect(iso(getAbsoluteBounds({ mode: "day", day: "2024-03-15" }, ZONE))).toEqual([
+      "2024-03-15T00:00:00-04:00",
+      "2024-03-16T00:00:00-04:00",
+    ]);
+  });
+
+  it("a date-only range ends at the midnight after its last day", () => {
+    expect(iso(getAbsoluteBounds({ mode: "range", startDate: "2024-03-08", endDate: "2024-03-14" }, ZONE))).toEqual([
+      "2024-03-08T00:00:00-05:00",
+      "2024-03-15T00:00:00-04:00",
+    ]);
+  });
+
+  it("a range with times keeps the exact instants it was given", () => {
+    const bounds = getAbsoluteBounds(
+      { mode: "range", startDate: "2024-03-08", startTime: "09:30:00", endDate: "2024-03-08", endTime: "17:00:00" },
+      ZONE
+    );
+    expect(iso(bounds)).toEqual(["2024-03-08T09:30:00-05:00", "2024-03-08T17:00:00-05:00"]);
+  });
+
+  it("week, month and year span exactly one of their unit", () => {
+    expect(iso(getAbsoluteBounds({ mode: "week", week: "2024-03-11" }, ZONE))![1]).toBe("2024-03-18T00:00:00-04:00");
+    expect(iso(getAbsoluteBounds({ mode: "month", month: "2024-02-01" }, ZONE))![1]).toBe("2024-03-01T00:00:00-05:00");
+    expect(iso(getAbsoluteBounds({ mode: "year", year: "2024-01-01" }, ZONE))![1]).toBe("2025-01-01T00:00:00-05:00");
+  });
+
+  it("month arithmetic handles a leap February", () => {
+    const bounds = getAbsoluteBounds({ mode: "month", month: "2024-02-01" }, ZONE)!;
+    expect(bounds.end.diff(bounds.start, "days").days).toBe(29);
+  });
+
+  it("past-minutes resolves against now", () => {
+    const bounds = getAbsoluteBounds({ mode: "past-minutes", pastMinutesStart: 60, pastMinutesEnd: 0 }, ZONE)!;
+    expect(Math.round(bounds.end.diff(bounds.start, "minutes").minutes)).toBe(60);
+  });
+
+  it("all-time has no bounds to resolve", () => {
+    expect(getAbsoluteBounds({ mode: "all-time" }, ZONE)).toBeNull();
+  });
+
+  it("the same day in two zones is two different instants", () => {
+    const ny = getAbsoluteBounds({ mode: "day", day: "2024-03-15" }, "America/New_York")!;
+    const tokyo = getAbsoluteBounds({ mode: "day", day: "2024-03-15" }, "Asia/Tokyo")!;
+    expect(ny.start.toMillis()).not.toBe(tokyo.start.toMillis());
+  });
+});
+
+describe("resolveComparison", () => {
+  const LAST_30: Time = { mode: "range", startDate: "2026-07-31", endDate: "2026-08-29" };
+
+  it("previous: the period immediately before, matching deriveTimeState", () => {
+    expect(resolveComparison(LAST_30, { mode: "previous" }, ZONE)).toEqual(deriveTimeState(LAST_30, ZONE).previousTime);
+  });
+
+  it("none: no window at all", () => {
+    expect(resolveComparison(LAST_30, { mode: "none" }, ZONE)).toBeNull();
+  });
+
+  it("custom: the named window, untouched by the selected period", () => {
+    const customTime: Time = { mode: "range", startDate: "2026-03-02", endDate: "2026-03-31" };
+
+    expect(resolveComparison(LAST_30, { mode: "custom", customTime }, ZONE)).toEqual(customTime);
+    expect(resolveComparison({ mode: "day", day: "2026-08-29" }, { mode: "custom", customTime }, ZONE)).toEqual(
+      customTime
+    );
+  });
+
+  it("custom: falls back to the previous period when no window has been named yet", () => {
+    expect(resolveComparison(LAST_30, { mode: "custom" }, ZONE)).toEqual(deriveTimeState(LAST_30, ZONE).previousTime);
+  });
+
+  it("weekday: steps back whole weeks so the days of the week line up", () => {
+    // 30 days rounds to 4 weeks back — Jul 31 (a Friday) is read against Jul 3,
+    // also a Friday.
+    const previous = resolveComparison(LAST_30, { mode: "weekday" }, ZONE);
+
+    expect(previous).toEqual({
+      mode: "range",
+      startDate: "2026-07-03",
+      startTime: "00:00:00",
+      endDate: "2026-08-02",
+      endTime: "00:00:00",
+    });
+    expect(dt("2026-07-03").weekday).toBe(dt("2026-07-31").weekday);
+  });
+
+  it("weekday: a single day is read against the same weekday a week earlier", () => {
+    expect(resolveComparison({ mode: "day", day: "2026-08-29" }, { mode: "weekday" }, ZONE)).toEqual({
+      mode: "day",
+      day: "2026-08-22",
+    });
+  });
+
+  it("year: the same dates a year earlier, keeping calendar modes calendar-shaped", () => {
+    expect(resolveComparison({ mode: "month", month: "2026-08-01" }, { mode: "year" }, ZONE)).toEqual({
+      mode: "month",
+      month: "2025-08-01",
+    });
+    expect(resolveComparison(LAST_30, { mode: "year" }, ZONE)).toEqual({
+      mode: "range",
+      startDate: "2025-07-31",
+      startTime: "00:00:00",
+      endDate: "2025-08-30",
+      endTime: "00:00:00",
+    });
+  });
+
+  it("falls back to the previous period where a mode cannot be expressed", () => {
+    const realtime: Time = { mode: "past-minutes", pastMinutesStart: 30, pastMinutesEnd: 0 };
+    const previous = deriveTimeState(realtime, ZONE).previousTime;
+
+    expect(resolveComparison(realtime, { mode: "year" }, ZONE)).toEqual(previous);
+    expect(resolveComparison(realtime, { mode: "weekday" }, ZONE)).toEqual(previous);
+    // Weekday alignment across whole months is meaningless.
+    expect(resolveComparison({ mode: "month", month: "2026-08-01" }, { mode: "weekday" }, ZONE)).toEqual({
+      mode: "month",
+      month: "2026-07-01",
+    });
+  });
+
+  it("all-time keeps its historical self-comparison for the default mode", () => {
+    expect(resolveComparison({ mode: "all-time" }, { mode: "previous" }, ZONE)).toEqual({ mode: "all-time" });
+    expect(resolveComparison({ mode: "all-time" }, { mode: "none" }, ZONE)).toBeNull();
+  });
+});
+
+describe("availableComparisonModes", () => {
+  it("offers only what a realtime window can answer", () => {
+    expect(availableComparisonModes({ mode: "past-minutes", pastMinutesStart: 30, pastMinutesEnd: 0 })).toEqual([
+      "previous",
+      "none",
+    ]);
+  });
+
+  it("drops weekday alignment for whole months and years", () => {
+    expect(availableComparisonModes({ mode: "month", month: "2026-08-01" })).not.toContain("weekday");
+    expect(availableComparisonModes({ mode: "range", startDate: "2026-07-31", endDate: "2026-08-29" })).toContain(
+      "weekday"
+    );
+  });
+});
+
+describe("comparison URL serialization", () => {
+  it("writes nothing for the default, so existing links are untouched", () => {
+    expect(comparisonToUrlParams({ mode: "previous" })).toEqual({
+      compare: null,
+      compareStart: null,
+      compareEnd: null,
+    });
+  });
+
+  it("round-trips a named mode", () => {
+    expect(urlParamsToComparison(comparisonToUrlParams({ mode: "year" }))).toEqual({ mode: "year" });
+  });
+
+  it("round-trips a custom window", () => {
+    const comparison = {
+      mode: "custom" as const,
+      customTime: { mode: "range" as const, startDate: "2026-03-02", endDate: "2026-03-31" },
+    };
+
+    expect(urlParamsToComparison(comparisonToUrlParams(comparison))).toEqual(comparison);
+  });
+
+  it("ignores a custom mode with no window and an unknown mode", () => {
+    expect(urlParamsToComparison({ compare: "custom" })).toBeNull();
+    expect(urlParamsToComparison({ compare: "sideways" })).toBeNull();
+    expect(urlParamsToComparison({})).toBeNull();
   });
 });

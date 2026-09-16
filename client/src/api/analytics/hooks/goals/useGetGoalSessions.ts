@@ -1,5 +1,7 @@
 import { Time } from "../../../../components/DateSelector/types";
-import { fetchGoalSessions, GetSessionsResponse, GoalSessionsParams } from "../../endpoints";
+import { GOALS_PAGE_FILTERS } from "../../../../lib/filterGroups";
+import { getFilteredFilters } from "../../../../lib/store";
+import { GetSessionsResponse } from "../../endpoints";
 import { useAnalyticsQuery } from "../../useAnalyticsQuery";
 
 export function useGetGoalSessions({
@@ -17,13 +19,16 @@ export function useGetGoalSessions({
   limit?: number;
   enabled?: boolean;
 }) {
-  return useAnalyticsQuery<{ data: GetSessionsResponse }, GoalSessionsParams>({
-    key: "goal-sessions",
+  const filteredFilters = getFilteredFilters(GOALS_PAGE_FILTERS);
+
+  return useAnalyticsQuery<GetSessionsResponse>({
+    key: ["goal-sessions", goalId],
+    path: `goals/${goalId}/sessions`,
     site: siteId,
     overrideTime: time,
-    useFilters: false,
-    extraParams: { goalId, page, limit },
+    useFilters: filteredFilters.length > 0,
+    customFilters: filteredFilters,
+    params: { page, limit },
     enabled: !!goalId && enabled,
-    fetch: (site, params) => fetchGoalSessions(site, params),
   });
 }
