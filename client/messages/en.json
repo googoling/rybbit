@@ -577,6 +577,7 @@
   "TdTXXf": "Learn more",
   "6Q0f/H": "Mapbox access token not found",
   "c7/Nan": "Please set the MAPBOX_TOKEN environment variable and rebuild all containers. To get a Mapbox token, please visit",
+  "whseIp": "Please set the MAPBOX_TOKEN environment variable and rebuild all containers. To get a free API key, please visit",
   "8uaAG9": "and create an account.",
   "JzAyne": "SESSIONS",
   "00LcfG": "Load more",

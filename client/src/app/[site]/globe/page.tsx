@@ -16,6 +16,7 @@ import MapStyleSelector from "./components/MapStyleSelector";
 import { TimelineScrubber } from "./components/TimelineScrubber";
 import { OpenLayersMap } from "./2d/components/OpenLayersMap";
 import { MapboxMap } from "./3d/components/MapboxMap";
+import { DARK_MAP_STYLE_ID } from "../../../lib/mapStyles";
 import { useGlobeStore } from "./globeStore";
 import { useTimelineLayer } from "./3d/hooks/timelineLayer/useTimelineLayer";
 import { useCoordinatesLayer } from "./3d/hooks/useCoordinatesLayer";
@@ -58,9 +59,9 @@ export default function GlobePage() {
         setMapStyle(timelineStyle);
       }
     } else {
-      // Force dark-v11 for non-timeline views
-      if (mapStyle !== "mapbox://styles/mapbox/dark-v11") {
-        setMapStyle("mapbox://styles/mapbox/dark-v11");
+      // Force the dark style for non-timeline views
+      if (mapStyle !== DARK_MAP_STYLE_ID) {
+        setMapStyle(DARK_MAP_STYLE_ID);
       }
     }
   }, [mapView, mapStyle, timelineStyle, setMapStyle]);

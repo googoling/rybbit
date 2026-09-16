@@ -20,14 +20,14 @@ export const MapboxMap = ({ mapContainer }: { mapContainer: RefObject<HTMLDivEle
             title={t("Mapbox access token not found")}
             description={
               <p className="text-sm max-w-[600px] text-center">
-                {t("Please set the MAPBOX_TOKEN environment variable and rebuild all containers. To get a Mapbox token, please visit")}{" "}
+                {t("Please set the MAPBOX_TOKEN environment variable and rebuild all containers. To get a free API key, please visit")}{" "}
                 <a
-                  href="https://docs.mapbox.com/help/dive-deeper/access-tokens/"
+                  href="https://cloud.maptiler.com/account/keys/"
                   target="_blank"
                   rel="noopener noreferrer"
                   className="text-blue-400 hover:underline"
                 >
-                  Mapbox
+                  MapTiler
                 </a>{" "}
                 {t("and create an account.")}
               </p>

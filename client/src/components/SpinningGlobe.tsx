@@ -10,6 +10,7 @@ import { useQuery } from "@tanstack/react-query";
 import type { GetSessionsResponse } from "../api/analytics/endpoints";
 import { useConfigs } from "../lib/configs";
 import { frogAvatarSVG } from "../lib/frogAvatar";
+import { buildMapStyleUrl, DEFAULT_MAP_STYLE_ID } from "../lib/mapStyles";
 import "../app/[site]/globe/globe.css";
 
 // Constants
@@ -149,7 +150,7 @@ export function SpinningGlobe() {
     try {
       map = new mapboxgl.Map({
         container: containerRef.current,
-        style: "mapbox://styles/mapbox/standard",
+        style: buildMapStyleUrl(DEFAULT_MAP_STYLE_ID, configs.mapboxToken),
         projection: { name: "globe" },
         zoom: 1.5,
         center: [0, 20],

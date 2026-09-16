@@ -8,6 +8,7 @@ import { useTheme } from "next-themes";
 import { cn } from "../../../../../lib/utils";
 import { Skeleton } from "../../../../../components/ui/skeleton";
 import { useConfigs } from "../../../../../lib/configs";
+import { buildMapStyleUrl, DARK_MAP_STYLE_ID, LIGHT_MAP_STYLE_ID } from "../../../../../lib/mapStyles";
 
 interface UserLocationMapProps {
   country: string;
@@ -25,7 +26,10 @@ export function UserLocationMap({ country, region, city, className }: UserLocati
 
   const query = [city, region, country].filter(Boolean).join(", ");
 
-  const style = resolvedTheme === "dark" ? "mapbox://styles/mapbox/dark-v11" : "mapbox://styles/mapbox/light-v11";
+  const style = buildMapStyleUrl(
+    resolvedTheme === "dark" ? DARK_MAP_STYLE_ID : LIGHT_MAP_STYLE_ID,
+    configs?.mapboxToken || ""
+  );
 
   const { data: coordinates, isLoading } = useQuery({
     queryKey: ["user-location-geocode", configs?.mapboxToken, query],
@@ -102,12 +106,12 @@ interface MapboxGeocodingResponse {
 async function geocodeUserLocation(token: string, query: string): Promise<[number, number] | null> {
   try {
     const params = new URLSearchParams({
-      access_token: token,
+      key: token,
       limit: "1",
     });
 
     const response = await fetch(
-      `https://api.mapbox.com/geocoding/v5/mapbox.places/${encodeURIComponent(query)}.json?${params}`
+      `https://api.maptiler.com/geocoding/${encodeURIComponent(query)}.json?${params}`
     );
 
     if (!response.ok) return null;

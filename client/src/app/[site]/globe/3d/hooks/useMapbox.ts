@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import mapboxgl from "mapbox-gl";
 import { useConfigs } from "../../../../../lib/configs";
+import { buildMapStyleUrl } from "../../../../../lib/mapStyles";
 import { useGlobeStore } from "../../globeStore";
 
 export function useMapbox(containerRef: React.RefObject<HTMLDivElement | null>, enabled: boolean = true) {
@@ -55,7 +56,7 @@ export function useMapbox(containerRef: React.RefObject<HTMLDivElement | null>, 
 
     const mapInstance = new mapboxgl.Map({
       container: containerRef.current,
-      style: mapStyle,
+      style: buildMapStyleUrl(mapStyle, configs.mapboxToken),
       projection: { name: "globe" },
       zoom: 1.5,
       center: [0, 20],
@@ -103,7 +104,7 @@ export function useMapbox(containerRef: React.RefObject<HTMLDivElement | null>, 
     setMapLoaded(false);
 
     mapInstance.once("style.load", handleStyleLoad);
-    mapInstance.setStyle(mapStyle);
+    mapInstance.setStyle(buildMapStyleUrl(mapStyle, configs?.mapboxToken || ""));
 
     // Cleanup function
     return () => {

@@ -1,6 +1,7 @@
 import { create } from "zustand";
 import { MapView } from "./components/ModeSelector";
 import { IS_CLOUD } from "../../../lib/const";
+import { DEFAULT_MAP_STYLE_ID } from "../../../lib/mapStyles";
 
 interface GlobeStore {
   mapView: MapView;
@@ -18,8 +19,8 @@ export const useGlobeStore = create<GlobeStore>(set => ({
   setMapView: view => set({ mapView: view }),
   mapMode: IS_CLOUD ? "3D" : "2D",
   setMapMode: mode => set({ mapMode: mode }),
-  mapStyle: "mapbox://styles/mapbox/standard",
+  mapStyle: DEFAULT_MAP_STYLE_ID,
   setMapStyle: style => set({ mapStyle: style }),
-  timelineStyle: "mapbox://styles/mapbox/standard",
+  timelineStyle: DEFAULT_MAP_STYLE_ID,
   setTimelineStyle: style => set({ timelineStyle: style }),
 }));
